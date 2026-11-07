@@ -3,7 +3,7 @@
  * hvilke bevægelser hører sammen, og går de op?
  */
 import { isBalanceRef, type Ledger } from './ledger';
-import type { AppData, Match } from './types';
+import type { Account, AppData, Match } from './types';
 import { dayDiff, uid } from './util';
 
 export interface SettleItem {
@@ -44,6 +44,10 @@ export function settleItems(data: AppData, ledger: Ledger, accountId: string): S
   }
   return [...byKey.values()].filter((i) => i.amount !== 0).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
+
+/** Skal posten afstemmes? Brugerens valg – ellers ja, hvis den allerede har grupper. */
+export const isSettled = (d: Pick<AppData, 'matches'>, a: Pick<Account, 'id' | 'settle' | 'kind'>) =>
+  a.kind === 'tracked' && (a.settle ?? (d.matches ?? []).some((m) => m.accountId === a.id));
 
 export function settleState(data: AppData, ledger: Ledger, accountId: string) {
   const items = settleItems(data, ledger, accountId);

@@ -48,6 +48,8 @@ export interface Account {
   defaultCategoryId?: string;
   /** Brugerens kommentar pr. periode (periodId → tekst). Kopieres til en ny periode fra den forrige. */
   notes?: Record<string, string>;
+  /** Med i "Udlæg & tilgodehavender" (afstemning). Uden valg: med, hvis posten allerede har afstemte grupper. */
+  settle?: boolean;
   /** Ældre kommentar uden periode – migreres til notes. */
   note?: string;
   /** Manuel åbningssaldo for bankkonti (ellers udledes den af første transaktions saldo). */

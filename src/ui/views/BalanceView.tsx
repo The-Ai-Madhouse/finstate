@@ -10,7 +10,7 @@ import { useStore } from '../../store/store';
 import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, SearchCombo, TypeSelect } from '../components/common';
 import { valuationResultInPeriod } from '../../domain/ledger';
 import { BalanceSourcesDialog } from '../components/SourcesDialog';
-import { SettlePanel } from '../components/SettlePanel';
+import { SettleToggle } from '../components/SettlePanel';
 
 export function BalanceView() {
   const period = usePeriod();
@@ -261,7 +261,7 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
       {acc.kind === 'tracked' ? (
         <div className="col" style={{ gap: 10 }}>
           <TrackedOpening acc={acc} autoFocus={focusOpening} />
-          <SettlePanel acc={acc} />
+          <SettleToggle acc={acc} />
         </div>
       ) : acc.kind === 'bank' ? (
         <div className="row small">
