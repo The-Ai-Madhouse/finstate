@@ -1,0 +1,505 @@
+import { describe, expect, it } from 'vitest';
+import { applyBackup, makeBackup, parseBackup } from './backup';
+import { resolveAll } from './classify';
+import { accountHint, buildTxs, decodeBytes, guessMapping, isCompleteMapping, parseCsv } from './csv';
+import { demoData } from './demo';
+import { defaultCategories, emptyData } from './defaults';
+import { buildEngine, periodChecks, withAutoBookStart } from './engine';
+import { parseAmount, parseDate } from './format';
+import { balancesAt } from './ledger';
+import { narrative } from './insights';
+import { guessCounterparty, normalizeText } from './normalize';
+import { orderChain } from './reconcile';
+import type { Tx } from './types';
+
+describe('parsing', () => {
+  it('parses Danish and English amounts', () => {
+    expect(parseAmount('1.234,56')).toBe(123456);
+    expect(parseAmount('-1.234,56')).toBe(-123456);
+    expect(parseAmount('1234,5')).toBe(123450);
+    expect(parseAmount('1,234.56')).toBe(123456);
+    expect(parseAmount('1.234')).toBe(123400);
+    expect(parseAmount('12.50')).toBe(1250);
+    expect(parseAmount('−99,00')).toBe(-9900);
+    expect(parseAmount('200-')).toBe(-20000);
+    expect(parseAmount('abc')).toBeNull();
+  });
+  it('parses dates', () => {
+    expect(parseDate('31.12.2025')).toBe('2025-12-31');
+    expect(parseDate('2025-12-31')).toBe('2025-12-31');
+    expect(parseDate('1/2/26')).toBe('2026-02-01');
+    expect(parseDate('hej')).toBeNull();
+  });
+  it('normalizes recurring texts', () => {
+    expect(normalizeText('Dankort-nota Købmand Hansen 4001 10.07')).toBe('købmand hansen');
+    expect(normalizeText('Visa/Dankort Café Solsikke')).toBe('café solsikke');
+    expect(normalizeText('Fitness Puls medlemskab')).toBe('fitness puls medlemskab');
+    expect(guessCounterparty('MobilePay Jonas Lind')).toBe('Jonas Lind');
+    expect(guessCounterparty('MobilePay: ida krogh 12345678')).toBe('Ida Krogh');
+  });
+  it('decodes windows-1252', () => {
+    const bytes = new Uint8Array([0x42, 0x65, 0x6c, 0xf8, 0x62]); // "Beløb" i cp1252
+    expect(decodeBytes(bytes.buffer)).toBe('Beløb');
+  });
+  it('detects columns behind metadata lines and orders newest-first files', () => {
+    const csv = 'Kontoudtog;Lønkonto\n\nDato;Tekst;Beløb;Saldo\n03.01.2026;B;-10,00;80,00\n02.01.2026;A;-10,00;90,00';
+    const sheet = parseCsv(csv);
+    const m = guessMapping(sheet);
+    expect(isCompleteMapping(m)).toBe(true);
+    const { txs, reversed } = buildTxs(sheet, m as never, 'a');
+    expect(reversed).toBe(true);
+    expect(txs.map((t) => t.text)).toEqual(['A', 'B']);
+    // Samme eksport to gange → samme id'er (ingen dubletter)
+    expect(buildTxs(sheet, m as never, 'a').txs.map((t) => t.id)).toEqual(txs.map((t) => t.id));
+  });
+});
+
+describe('bankformat med hoved-/underkategori, kommentar og kontonavn', () => {
+  const csv = [
+    '"Dato";"Tekst";"Beløb";"Saldo";"Afstemt";"Kontonummer";"Kontonavn";"Hovedkategori";"Kategori";"Kommentar"',
+    '"15.01.2025";"KORTKØB KØBMAND HANSEN 7";"-32,00";"3.299,65";"Ja";"0000 1234567";"Min lønkonto";"Mad og indkøb";"Dagligvarer";"Kage til fredagsbaren"',
+    '"03.01.2025";"KORTKØB TANKSTATION VEST";"-460,00";"3.331,65";"Ja";"0000 1234567";"Min lønkonto";"Transport";"Brændstof";""',
+  ].join('\n');
+  it('maps hoved-/underkategori, kommentar and kontonavn', () => {
+    const sheet = parseCsv(csv);
+    const m = guessMapping(sheet);
+    expect(sheet.header[m.category!]).toBe('Hovedkategori');
+    expect(sheet.header[m.subcategory!]).toBe('Kategori');
+    expect(sheet.header[m.note!]).toBe('Kommentar');
+    expect(accountHint(sheet, m)).toBe('Min lønkonto');
+    const { txs } = buildTxs(sheet, m as never, 'acc-a');
+    expect(txs[1].note).toBe('Kage til fredagsbaren');
+    expect(txs[1].bankSubcategory).toBe('Dagligvarer');
+    expect(normalizeText(txs[0].text)).toBe('tankstation vest');
+  });
+  it('follows the data with book start and can ignore bank categories', () => {
+    const sheet = parseCsv(csv);
+    const d = { ...emptyData(), categories: defaultCategories(), txs: buildTxs(sheet, guessMapping(sheet) as never, 'acc-a').txs };
+    expect(withAutoBookStart(d).settings.bookStart).toBe('2024-12-31');
+    expect(withAutoBookStart({ ...d, settings: { ...d.settings, bookStart: '2025-06-30', bookStartSet: true } }).settings.bookStart).toBe('2025-06-30');
+    const shop = d.txs.find((t) => t.text.includes('HANSEN'))!;
+    const r = resolveAll(d).get(shop.id)!;
+    expect(r.source).toBe('bankguess');
+    expect(r.lines[0].categoryId).toBe('ex-dagligvarer');
+    expect(resolveAll({ ...d, settings: { ...d.settings, useBankCategories: false } }).get(shop.id)!.source).toBe('none');
+    // Uden en passende kategori hos brugeren gættes der ikke.
+    expect(resolveAll({ ...d, categories: [] }).get(shop.id)!.source).toBe('none');
+  });
+});
+
+describe('saldokæde', () => {
+  const tx = (id: string, date: string, amount: number, balance: number, seq: number): Tx => ({ id, accountId: 'a', date, text: id, amount, balance, seq, importedAt: '' });
+  it('orders same-day transactions by chain and finds gaps', () => {
+    const { ordered, breaks } = orderChain([tx('2', '2026-01-01', -5, 85, 0), tx('1', '2026-01-01', -10, 90, 1), tx('3', '2026-01-05', -1, 50, 2)]);
+    expect(ordered.map((t) => t.id)).toEqual(['1', '2', '3']);
+    expect(breaks).toHaveLength(1);
+    expect(breaks[0].diff).toBe(51 - 85);
+  });
+});
+
+describe('demo: hele motoren', () => {
+  const data = demoData();
+  const e = buildEngine(data);
+  const [h2, h1] = data.periods;
+
+  it('balances every period by construction', () => {
+    for (const p of data.periods) {
+      const s = e.statement(p);
+      expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
+      expect(s.assetsClose - s.liabClose).toBe(s.equityClose);
+    }
+  });
+
+  it('bank ledger matches the bank saldo and has no chain breaks', () => {
+    const checks = periodChecks(e, h1);
+    expect(checks.filter((c) => c.level === 'error')).toEqual([]);
+    expect(checks.find((c) => c.id === 'balance')?.level).toBe('ok');
+  });
+
+  it('moves the delayed new-year transfer to "Penge undervejs" and clears it next period', () => {
+    expect(balancesAt(e.ledger, '2025-12-31').get('transit')).toBe(600000);
+    expect(balancesAt(e.ledger, '2026-01-02').get('transit') ?? 0).toBe(0);
+    const s = e.statement(h2);
+    expect(s.rows.find((r) => r.ref === 'transit')?.close).toBe(600000);
+  });
+
+  it('pairs internal transfers and books depot transfers directly', () => {
+    const pairs = [...e.resolved.values()].filter((r) => r.pairId).length;
+    expect(pairs).toBeGreaterThanOrEqual(24); // 12 måneder × 2 sider (+ nytår)
+    const dep = e.statement(h2).rows.find((r) => r.ref === 'acc:acc-depot')!;
+    expect(dep.close).toBe(3565000);
+  });
+
+  it('follows transfers for a tracked post', () => {
+    const jonas = e.statement(h2).rows.find((r) => r.ref === 'acc:acc-jonas')!;
+    expect([jonas.open, jonas.close]).toEqual([20000, 0]);
+  });
+
+  it('keeps the user in charge (no rules by default)', () => {
+    expect(data.settings.rulesEnabled).toBe(false);
+    const tx = data.txs.find((t) => t.text.startsWith('Fitness Puls'))!;
+    const d2 = { ...data, txs: data.txs.map((t) => (t.id === tx.id ? { ...t, manual: { type: 'expense' as const, categoryId: 'ex-hobby-sport' } } : t)) };
+    expect(resolveAll(d2).get(tx.id)!.lines[0].categoryId).toBe('ex-hobby-sport');
+    expect(resolveAll(d2).get(tx.id)!.source).toBe('manual');
+  });
+
+  it('writes a narrative', () => {
+    const n = narrative(e.statement(h1), e.statement(h2));
+    expect(n.summary).toContain('2026 H1');
+    expect(n.progress.length + n.setbacks.length).toBeGreaterThan(0);
+  });
+});
+
+describe('backup', () => {
+  it('starts completely empty', () => {
+    const d = emptyData();
+    expect([d.accounts, d.accountTypes, d.categories, d.rules, d.txs]).toEqual([[], [], [], [], []]);
+  });
+  it('round-trips and merges', () => {
+    const d = demoData();
+    const b = parseBackup(JSON.stringify(makeBackup(d, 'full')));
+    expect(applyBackup(emptyData(), b, 'replace').txs).toHaveLength(d.txs.length);
+    const rules = parseBackup(JSON.stringify(makeBackup(d, 'rules')));
+    const merged = applyBackup({ ...emptyData(), txs: d.txs.slice(0, 3) }, rules, 'merge');
+    expect(merged.txs).toHaveLength(3);
+    expect(() => parseBackup('{"app":"x"}')).toThrow();
+  });
+});
+
+describe('månedligt cashflow', () => {
+  it('uses the actual period length', async () => {
+    const { periodMonths, perMonth, cashflow, isPassive } = await import('./cashflow');
+    expect(periodMonths({ start: '2025-01-01', end: '2025-12-31' })).toBeCloseTo(11.99, 1);
+    expect(periodMonths({ start: '2025-01-01', end: '2025-06-30' })).toBeCloseTo(5.95, 2);
+    expect(perMonth(600000, periodMonths({ start: '2025-01-01', end: '2025-06-30' }))).toBe(100896);
+    const d = demoData();
+    const e = buildEngine(d);
+    const s = e.statement(d.periods[1]);
+    const cf = cashflow(s, d.categories);
+    expect(cf.cashflowM).toBe(cf.incomeM - cf.expenseM);
+    expect(Math.abs(cf.cashflowM * cf.months - s.result)).toBeLessThan(200); // afrunding pr. måned
+    expect(isPassive(d.categories, 'bo-renter-afkast')).toBe(true);
+    expect(isPassive(d.categories, 'in-loen')).toBe(false);
+    expect(cf.passive).toBe(s.income.find((c) => c.id === 'bo-renter-afkast')?.amount ?? 0);
+    expect(isPassive([...d.categories.map((c) => (c.id === 'bo-renter-afkast' ? { ...c, passive: false } : c))], 'bo-renter-afkast')).toBe(false);
+  });
+});
+
+describe('importdækning', () => {
+  it('reports whether bank data covers the period', async () => {
+    const { importCoverage } = await import('./engine');
+    const d = demoData();
+    const [h2, h1] = d.periods;
+    expect(importCoverage(d, h2).every((c) => c.coversStart && c.coversEnd)).toBe(true);
+    const later = { id: 'x', name: '2026 H2', start: '2026-07-01', end: '2026-12-31' };
+    const cov = importCoverage(d, later, '2027-02-01');
+    expect(cov.every((c) => !c.coversEnd && !c.coversStart)).toBe(true);
+    expect(importCoverage(d, h1)[0].coversEnd).toBe(true);
+  });
+});
+
+describe('bogføringsstart', () => {
+  it('also covers periods started before import', () => {
+    const d = { ...emptyData(), periods: [{ id: 'p', name: '2025 H2', start: '2025-07-01', end: '2025-12-31' }] };
+    expect(withAutoBookStart(d).settings.bookStart).toBe('2025-06-30');
+  });
+});
+
+describe('depoteksport (UTF-16, tabulator)', () => {
+  const rows = [
+    ['Id', 'Bogføringsdag', 'Handelsdag', 'Valørdag', 'Depot', 'Transaktionstype', 'Værdipapirer', 'ISIN', 'Antal', 'Kurs', 'Beløb', 'Valuta', 'Saldo', 'Transaktionstekst'],
+    ['3', '2025-12-01', '2025-12-01', '2025-12-01', '11112222', 'INDBETALING', '', '', '', '', '2000', 'DKK', '2500', 'Overførsel'],
+    ['2', '2025-11-25', '2025-11-25', '2025-11-27', '11112222', 'KØBT', 'Eksempel Global Indeksfond Acc', 'XX0000000001', '10', '150', '-1500', 'DKK', '500', ''],
+    ['1', '2025-11-03', '2025-11-03', '2025-11-03', '11112222', 'INDBETALING', '', '', '', '', '2000', 'DKK', '2000', 'Overførsel'],
+  ];
+  const text = '\ufeff' + rows.map((r) => r.join('\t')).join('\r\n') + '\r\n';
+  const utf16le = (s: string) => {
+    const b = new Uint8Array(s.length * 2);
+    for (let i = 0; i < s.length; i++) { b[i * 2] = s.charCodeAt(i) & 0xff; b[i * 2 + 1] = s.charCodeAt(i) >> 8; }
+    return b.buffer;
+  };
+  it('decodes UTF-16 and maps broker columns', async () => {
+    const { isBrokerSheet } = await import('./csv');
+    const decoded = decodeBytes(utf16le(text));
+    expect(decoded.startsWith('Id\tBogføringsdag')).toBe(true);
+    const sheet = parseCsv(decoded);
+    const m = guessMapping(sheet);
+    expect(sheet.header[m.date!]).toBe('Bogføringsdag');
+    expect(sheet.header[m.amount!]).toBe('Beløb');
+    expect(sheet.header[m.balance!]).toBe('Saldo');
+    expect(m.text!.map((i) => sheet.header[i])).toEqual(['Transaktionstype', 'Værdipapirer', 'Transaktionstekst']);
+    expect(isBrokerSheet(sheet)).toBe(true);
+    const { txs } = buildTxs(sheet, m as never, 'acc-depot');
+    expect(txs.map((t) => t.text)).toEqual(['INDBETALING · Overførsel', 'KØBT · Eksempel Global Indeksfond Acc', 'INDBETALING · Overførsel']);
+    expect(orderChain(txs).breaks).toEqual([]);
+  });
+  it('decodes UTF-16 without BOM', () => {
+    expect(decodeBytes(utf16le('Dato\tBeløb\r\n'))).toBe('Dato\tBeløb\r\n');
+  });
+});
+
+describe('husket opdeling (regler slået til)', () => {
+  it('splits a fixed part off and keeps the rest as income', () => {
+    const d0 = demoData();
+    const d = { ...d0, settings: { ...d0.settings, rulesEnabled: true } };
+    const pay = d.txs.find((t) => t.text === 'Løn Nordlys Design ApS')!;
+    const rule = {
+      id: 'r-pension', pattern: normalizeText(pay.text), match: 'exact' as const, sign: 'in' as const, createdAt: '',
+      then: { type: 'income' as const, categoryId: 'in-loen' },
+      splits: [{ cls: { type: 'income' as const, categoryId: 'in-loen' } }, { cls: { type: 'internal' as const, targetAccountId: 'acc-bil' }, amount: 1000_00 }],
+    };
+    const d2 = { ...d, rules: [rule] };
+    const r = resolveAll(d2).get(pay.id)!;
+    expect(r.source).toBe('rule');
+    expect(r.lines.map((l) => [l.type, l.amount])).toEqual([['income', pay.amount - 100000], ['internal', 100000]]);
+    const s = buildEngine(d2).statement(d2.periods[1]);
+    const before = buildEngine(d).statement(d.periods[1]);
+    const loen = (x: typeof s) => x.income.find((c) => c.id === 'in-loen')!.amount;
+    expect(loen(before) - loen(s)).toBe(100000 * 6);
+    expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
+    // Med regler slået fra ignoreres reglen.
+    expect(resolveAll({ ...d2, settings: { ...d2.settings, rulesEnabled: false } }).get(pay.id)!.source).not.toBe('rule');
+  });
+});
+
+describe('indbyggede forslag', () => {
+  it('never turns MobilePay into udlæg by itself', () => {
+    const d = demoData();
+    const r = resolveAll(d);
+    const mp = d.txs.filter((t) => /MobilePay/.test(t.text));
+    expect(mp.length).toBeGreaterThan(0);
+    expect(mp.every((t) => r.get(t.id)!.lines[0].type !== 'outlay')).toBe(true);
+  });
+  it('respects the on/off switches for alias and amount matching', () => {
+    const d = demoData();
+    const til = d.txs.find((t) => t.text === 'Overførsel til Fælles opsparing')!;
+    expect(resolveAll(d).get(til.id)!.source).toBe('alias');
+    const off = { ...d, settings: { ...d.settings, autoAlias: false, autoPair: false } };
+    const r = resolveAll(off).get(til.id)!;
+    expect(['alias', 'pair']).not.toContain(r.source);
+  });
+});
+
+describe('bankens nøgleord', () => {
+  it('matches whole words only and finds the user\'s own category by name', async () => {
+    const { BANK_KEYWORD_GUESSES, guessCategory } = await import('./defaults');
+    const cats = defaultCategories();
+    const hit = (s: string) => { const g = BANK_KEYWORD_GUESSES.find((x) => x.re.test(s)); return g && guessCategory(cats, g); };
+    expect(hit('overførsler mobilepay')).toBeUndefined();
+    expect(hit('bolig telefon og internet')).toBe('ex-abonnementer');
+    expect(hit('shopping tøj')).toBe('ex-beklaedning');
+    expect(hit('mad og drikke café')).toBe('ex-spisesteder');
+    expect(hit('mad og drikke cafe')).toBe('ex-spisesteder');
+    expect(hit('indkomst renter')).toBe('bo-renter-afkast');
+  });
+});
+
+describe('migrering: udlæg → intern overførsel til personpost', () => {
+  it('moves legacy outlays to tracked posts without changing the numbers', async () => {
+    const { migrateOutlays, hasLegacyOutlays } = await import('./migrate');
+    const { balancesAt } = await import('./ledger');
+    const d0 = demoData();
+    const jonas = d0.txs.filter((t) => t.text === 'MobilePay Jonas Lind' && !t.manual);
+    const legacy = {
+      ...d0,
+      settings: { ...d0.settings, rulesEnabled: true },
+      txs: d0.txs.map((t) => (t.id === jonas[0].id ? { ...t, manual: { type: 'outlay' as const, counterparty: 'Jonas Lind' } } : t)),
+      rules: [{ id: 'r-ida', pattern: 'mobilepay ida krogh', match: 'exact' as const, then: { type: 'outlay' as const }, createdAt: '' }],
+    };
+    expect(hasLegacyOutlays(legacy)).toBe(true);
+    const before = buildEngine(legacy);
+    const migrated = migrateOutlays(legacy);
+    expect(hasLegacyOutlays(migrated)).toBe(false);
+    const after = buildEngine(migrated);
+    const jAcc = migrated.accounts.find((a) => a.name === 'Jonas Lind')!;
+    const iAcc = migrated.accounts.find((a) => a.name === 'Ida Krogh')!;
+    expect(jAcc.kind).toBe('tracked');
+    expect(iAcc.kind).toBe('tracked');
+    // Samme tal som før: egenkapital og personernes saldi
+    for (const p of migrated.periods) {
+      expect(after.statement(p).equityClose).toBe(before.statement(p).equityClose);
+      expect(after.statement(p).result).toBe(before.statement(p).result);
+    }
+    const end = '2026-06-30';
+    expect(balancesAt(after.ledger, end).get(`acc:${jAcc.id}`)).toBe(balancesAt(before.ledger, end).get('cp:jonas lind'));
+    expect(balancesAt(after.ledger, end).get(`acc:${iAcc.id}`)).toBe(balancesAt(before.ledger, end).get('cp:ida krogh'));
+    // Idempotent
+    expect(migrateOutlays(migrated)).toBe(migrated);
+  });
+});
+
+describe('posttyper og datamodel v2', () => {
+  it('turns the old predefined types into the user\'s own types, notes into per-period notes and rules into own choices', async () => {
+    const { migrateModel } = await import('./migrate');
+    const base = emptyData();
+    const old = {
+      ...base,
+      settings: { ...base.settings, bookStart: '2025-06-30', bookStartSet: true },
+      categories: defaultCategories(),
+      periods: [{ id: 'p1', name: 'H2', start: '2025-07-01', end: '2025-12-31' }, { id: 'p2', name: 'H1', start: '2026-01-01', end: '2026-06-30' }],
+      accounts: [
+        { id: 'a', name: 'Lønkonto', kind: 'bank' as const, subtype: 'liquid', side: 'asset' as const, aliases: [] },
+        { id: 'b', name: 'Depot', kind: 'valuation' as const, subtype: 'securities', side: 'asset' as const, aliases: [], note: 'Indeksfond' },
+        { id: 'c', name: 'Skat', kind: 'tracked' as const, subtype: 'payable', side: 'liability' as const, aliases: [] },
+        { id: 'd', name: 'Gammel konto', kind: 'bank' as const, subtype: 'liquid', side: 'asset' as const, aliases: [], archived: true },
+      ],
+      txs: [{ id: 't1', accountId: 'a', date: '2025-08-01', text: 'Fitness Puls', amount: -27900, seq: 0, importedAt: '' }],
+      rules: [{ id: 'r', pattern: 'fitness puls', match: 'exact' as const, then: { type: 'expense' as const, categoryId: 'ex-hobby-sport' }, createdAt: '' }],
+    };
+    const d = migrateModel({ ...old, settings: { ...old.settings, rulesEnabled: undefined } });
+    expect(d.accountTypes.map((t) => t.name)).toEqual(['Likvide midler', 'Værdipapirer']);
+    expect(d.accounts.every((a) => a.subtype === undefined)).toBe(true);
+    expect(d.accounts.find((a) => a.id === 'c')!.typeId).toBeUndefined(); // "Andet" = ingen type
+    expect(d.accounts.find((a) => a.id === 'b')!.notes).toEqual({ p1: 'Indeksfond', p2: 'Indeksfond' });
+    expect(d.periods[0].accountIds).toEqual(['a', 'b', 'c']);
+    // Reglen er blevet til dit eget valg, og regler er slået fra.
+    expect(d.settings.rulesEnabled).toBe(false);
+    expect(d.txs[0].manual).toEqual({ type: 'expense', categoryId: 'ex-hobby-sport' });
+    expect(resolveAll(d).get('t1')!.source).toBe('manual');
+    // Idempotent
+    expect(migrateModel(d)).toBe(d);
+  });
+
+  it('copies posts and notes from the previous period into a new one', async () => {
+    const { withNewPeriod } = await import('./accountTypes');
+    const d = demoData();
+    const n = withNewPeriod(d, { id: 'p-2026-h2', name: '2026 H2', start: '2026-07-01', end: '2026-12-31' });
+    expect(n.periods.find((p) => p.id === 'p-2026-h2')!.accountIds).toEqual(d.periods[1].accountIds);
+    expect(n.accounts.find((a) => a.id === 'acc-bil')!.notes!['p-2026-h2']).toBe('Fast rente 4,9 %');
+  });
+
+  it('only shows posts in the period\'s list – unless they have a balance', () => {
+    const d = demoData();
+    const ids = d.periods[1].accountIds!.filter((id) => id !== 'acc-jonas' && id !== 'acc-depot');
+    const d2 = { ...d, periods: d.periods.map((p) => (p.id === 'p-2026-h1' ? { ...p, accountIds: ids } : p)) };
+    const s = buildEngine(d2).statement(d2.periods[1]);
+    expect(s.rows.some((r) => r.ref === 'acc:acc-jonas')).toBe(false); // 0 kr – skjult
+    expect(s.rows.some((r) => r.ref === 'acc:acc-depot')).toBe(true); // har en saldo – vises stadig
+  });
+});
+
+describe('aktiv eller passiv efter fortegn', () => {
+  it('places a post by the sign of its balance', () => {
+    const d = demoData();
+    const d2 = { ...d, openItems: d.openItems.map((o) => ({ ...o, amount: -50000 })) };
+    const s = buildEngine(d2).statement(d2.periods[0]);
+    const j = s.rows.find((r) => r.ref === 'acc:acc-jonas')!;
+    expect(j.side).toBe('liability');
+    expect(s.assetsClose - s.liabClose).toBe(s.equityClose);
+  });
+});
+
+describe('kategorier der går begge veje', () => {
+  it('puts a net positive amount under income and a net negative under expense', () => {
+    const base = emptyData();
+    const mk = (amount: number) => ({
+      ...base,
+      settings: { ...base.settings, bookStart: '2025-06-30', bookStartSet: true },
+      categories: [{ id: 'bo-r', name: 'Renter', kind: 'both' as const }],
+      accounts: [{ id: 'a', name: 'Lønkonto', kind: 'bank' as const, side: 'asset' as const, aliases: [] }],
+      periods: [{ id: 'p', name: 'H2', start: '2025-07-01', end: '2025-12-31' }],
+      txs: [{ id: 't', accountId: 'a', date: '2025-08-01', text: 'Rente', amount, seq: 0, importedAt: '', manual: { type: amount > 0 ? 'income' as const : 'expense' as const, categoryId: 'bo-r' } }],
+    });
+    const plus = buildEngine(mk(5000)).statement(mk(5000).periods[0]);
+    expect(plus.income.map((c) => [c.id, c.amount])).toEqual([['bo-r', 5000]]);
+    expect(plus.expense).toEqual([]);
+    const minus = buildEngine(mk(-5000)).statement(mk(-5000).periods[0]);
+    expect(minus.expense.map((c) => [c.id, c.amount])).toEqual([['bo-r', 5000]]);
+    expect(minus.income).toEqual([]);
+  });
+  it('lets a loan\'s interest land as an expense in the same category', async () => {
+    const { valuationResultInPeriod } = await import('./ledger');
+    const d = demoData();
+    const e = buildEngine(d);
+    // Billån: −68.000 → −56.900 med 6 × 2.100 i afdrag ⇒ 1.500 i renter.
+    expect(valuationResultInPeriod(d, e.ledger, d.periods[0], 'acc-bil').get('cat:bo-renter-afkast')).toBe(-150000);
+  });
+});
+
+describe('skift mellem tast selv og følger overførsler', () => {
+  it('moves the typed opening value into the start balance – and back', async () => {
+    const { switchKind } = await import('./accountTypes');
+    const d = demoData();
+    const t = switchKind(d, 'acc-depot', 'tracked');
+    const start = t.openItems.find((o) => o.accountId === 'acc-depot')!;
+    expect(start.amount).toBe(3100000);
+    expect(start.date).toBe('2025-06-30');
+    expect(buildEngine(t).statement(t.periods[0]).rows.find((r) => r.ref === 'acc:acc-depot')!.open).toBe(3100000);
+    const back = switchKind(t, 'acc-depot', 'valuation');
+    expect(back.openItems.some((o) => o.accountId === 'acc-depot')).toBe(false);
+  });
+});
+
+describe('likvide midler uden import', () => {
+  it('books transfers to a non-imported cash account directly (not as money in transit)', async () => {
+    const { balancesAt } = await import('./ledger');
+    const d = demoData();
+    const cash = { id: 'acc-kontanter', name: 'Kontanter', kind: 'bank' as const, side: 'asset' as const, aliases: [] };
+    const tx = d.txs.find((t) => t.text.startsWith('Kortkøb Café Solsikke'))!;
+    const d2 = { ...d, accounts: [...d.accounts, cash], txs: d.txs.map((t) => (t.id === tx.id ? { ...t, manual: { type: 'internal' as const, targetAccountId: cash.id } } : t)) };
+    const b = balancesAt(buildEngine(d2).ledger, '2026-06-30');
+    expect(b.get('acc:acc-kontanter')).toBe(-tx.amount);
+    expect(b.get('transit') ?? 0).toBe(balancesAt(buildEngine(d).ledger, '2026-06-30').get('transit') ?? 0);
+  });
+});
+
+describe('passive udgifter', () => {
+  it('are only passive when marked, and coverage uses them', async () => {
+    const { cashflow, isPassive } = await import('./cashflow');
+    const d = demoData();
+    expect(isPassive(d.categories, 'ex-abonnementer--streaming')).toBe(false);
+    const marked = d.categories.map((c) => (c.id === 'ex-bolig' || c.id === 'ex-abonnementer' ? { ...c, passive: true } : c));
+    expect(isPassive(marked, 'ex-abonnementer--streaming')).toBe(true); // arver fra hovedkategorien
+    const s = buildEngine(d).statement(d.periods[1]);
+    const cf = cashflow(s, marked);
+    const fixed = (s.expense.find((c) => c.id === 'ex-bolig')?.amount ?? 0) + (s.expense.find((c) => c.id === 'ex-abonnementer')?.amount ?? 0);
+    expect(cf.passiveExpense).toBe(fixed);
+    expect(cf.passiveCoverage).toBeCloseTo(cf.passive / fixed, 6);
+  });
+});
+
+describe('kilder til et resultatbeløb', () => {
+  it('explains depot return as a valuation change minus transfers', async () => {
+    const { plSources, valuationResultInPeriod } = await import('./ledger');
+    const d = demoData();
+    const e = buildEngine(d);
+    const [h2] = d.periods;
+    const src = plSources(d, e.ledger, h2, new Set(['cat:bo-renter-afkast']));
+    const dep = src.valuations.find((v) => v.accountId === 'acc-depot')!;
+    expect(dep.valueTo - dep.valueFrom - dep.transfers).toBe(dep.amount);
+    // Afkast = 35.650 − 31.000 − 2 × 1.500 overførsler = 1.650
+    expect(valuationResultInPeriod(d, e.ledger, h2, 'acc-depot').get('cat:bo-renter-afkast')).toBe(165000);
+    const groceries = plSources(d, e.ledger, h2, new Set(['cat:ex-dagligvarer']));
+    expect(groceries.tx.length).toBeGreaterThan(0);
+    expect(-groceries.total).toBe(e.statement(h2).expense.find((c) => c.id === 'ex-dagligvarer')!.amount);
+  });
+});
+
+describe('kilder til en balancepost', () => {
+  it('primo + bevægelser = ultimo for alle poster', async () => {
+    const { balanceSources } = await import('./ledger');
+    const d = demoData();
+    const e = buildEngine(d);
+    for (const p of d.periods) {
+      for (const row of e.statement(p).rows) {
+        const src = balanceSources(e.ledger, row.ref, p);
+        expect(src.primo).toBe(row.open);
+        expect(src.ultimo).toBe(row.close);
+        expect(src.primo + src.moves.reduce((s, m) => s + m.amount, 0)).toBe(src.ultimo);
+      }
+    }
+  });
+});
+
+describe('beløbsfelt', () => {
+  it('formats while typing', async () => {
+    const { formatAmountLive } = await import('../ui/components/common');
+    expect(formatAmountLive('1234567')).toBe('1.234.567');
+    expect(formatAmountLive('1.2345,6')).toBe('12.345,6');
+    expect(formatAmountLive('12345,678')).toBe('12.345,67');
+    expect(formatAmountLive('-5000')).toBe('−5.000');
+    expect(formatAmountLive(',5')).toBe('0,5');
+    expect(formatAmountLive('')).toBe('');
+    expect(parseAmount('−12.345,67'.replace('−', '-'))).toBe(-1234567);
+  });
+});

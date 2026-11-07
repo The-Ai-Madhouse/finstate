@@ -1,0 +1,590 @@
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { NEEDS_REVIEW, SOURCE_LABEL, type Source } from '../../domain/classify';
+import type { Check } from '../../domain/engine';
+import { kr, kr2f, parseAmount } from '../../domain/format';
+import { type Account, type Category, type Classification, type Tx, type TxType } from '../../domain/types';
+import { newCategoryId } from '../../domain/defaults';
+import { useData, useStore, type View } from '../../store/store';
+import { setMemo } from '../../store/actions';
+import { KIND_LABEL, NO_TYPE, addAccountType, noteFor, suggestCategory, withAccountInPeriods } from '../../domain/accountTypes';
+import { uid } from '../../domain/util';
+
+/**
+ * Beløb. decimals: "1.234,56" (tabeller med transaktioner). precise: "1.234,56 kr" (saldi i balancen).
+ * Ellers hele kroner: "1.235 kr".
+ */
+export function Money({ v, decimals, precise, signed, colored }: { v: number; decimals?: boolean; precise?: boolean; signed?: boolean; colored?: boolean }) {
+  const txt = precise ? `${kr2f(signed ? Math.abs(v) : v)} kr` : decimals ? kr2f(v) : kr(signed ? Math.abs(v) : v);
+  // Fortegn og farve ud fra det viste (afrundede) beløb – ellers "−0 kr".
+  const shown = decimals || precise ? v : Math.round(v / 100) * 100;
+  const sign = signed ? (shown > 0 ? '+' : shown < 0 ? '−' : '') : '';
+  return <span className={`num ${colored ? (shown > 0 ? 'pos' : shown < 0 ? 'neg' : '') : ''}`}>{sign}{txt}</span>;
+}
+
+/** Indtægt og udgift er ét valg – hvilken det er, følger af beløbets fortegn (og kategorien). */
+export type TypeKey = 'pl' | 'internal';
+export const TYPE_KEYS: Record<string, TypeKey> = { '1': 'pl', '2': 'internal' };
+export const typeKeyOf = (t?: TxType): TypeKey | undefined => (t === 'income' || t === 'expense' ? 'pl' : t === 'internal' || t === 'outlay' ? 'internal' : undefined);
+export const plLabel = (amount: number) => (amount > 0 ? 'Indtægt' : amount < 0 ? 'Udgift' : 'Indtægt/udgift');
+
+/** Indtægt eller udgift for en kategori – en "begge"-kategori følger beløbets fortegn. */
+export const plTypeOf = (cat: Category | undefined, amount: number): 'income' | 'expense' =>
+  !cat || cat.kind === 'both' ? (amount > 0 ? 'income' : 'expense') : cat.kind;
+
+/** Skift type ud fra en tast/knap – bevarer kategori/modpart, hvor det giver mening. */
+export function withTypeKey(c: Classification, key: TypeKey, amount: number, categories: Category[]): Classification {
+  if (key === 'pl') {
+    const cat = categories.find((x) => x.id === c.categoryId);
+    return { type: plTypeOf(cat, amount), categoryId: cat?.id };
+  }
+  return { type: 'internal', targetAccountId: c.targetAccountId };
+}
+
+export function TypeSeg({ value, amount, onChange }: { value?: TxType; amount: number; onChange: (k: TypeKey) => void }) {
+  const cur = typeKeyOf(value);
+  const opts: { k: TypeKey; label: string; t: string; tip: string }[] = [
+    { k: 'pl', label: plLabel(amount), t: amount > 0 ? 'income' : 'expense', tip: 'Rigtige penge ind eller ud – følger beløbets fortegn' },
+    { k: 'internal', label: 'Intern', t: 'internal', tip: 'Penge der flytter til/fra en post på din balance – en anden konto, et depot, et lån eller fx "Jonas skylder mig". Hverken indtægt eller udgift.' },
+  ];
+  return (
+    <div className="seg" role="radiogroup" aria-label="Type">
+      {opts.map((o, i) => (
+        <button key={o.k} data-t={o.t} className={cur === o.k ? 'on' : ''} role="radio" aria-checked={cur === o.k} title={`${o.tip} (tast ${i + 1})`} onClick={() => onChange(o.k)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Opret kategori/underkategori på stedet – uden at forlade det, man er i gang med. */
+export const KIND_NAME: Record<Category['kind'], string> = { income: 'Indtægt', expense: 'Udgift', both: 'Begge veje' };
+
+function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, initialName = '' }: {
+  kind?: Category['kind'];
+  defaultKind?: Category['kind'];
+  defaultParent?: string;
+  onDone: (id?: string) => void;
+  initialName?: string;
+}) {
+  const { categories } = useData();
+  const update = useStore((s) => s.update);
+  const [kind, setKind] = useState<Category['kind']>(fixedKind ?? categories.find((c) => c.id === defaultParent)?.kind ?? defaultKind ?? 'expense');
+  const tops = categories.filter((c) => !c.parentId && c.kind === kind);
+  const [parent, setParent] = useState<string>(defaultParent && tops.some((t) => t.id === defaultParent) ? defaultParent : '');
+  const [name, setName] = useState(initialName);
+  const dup = categories.some((c) => c.kind === kind && (c.parentId ?? '') === parent && c.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const create = () => {
+    if (!name.trim() || dup) return;
+    const id = newCategoryId(categories, kind, name.trim(), parent || undefined);
+    update((d) => ({ ...d, categories: [...d.categories, { id, name: name.trim(), kind, parentId: parent || undefined }] }));
+    onDone(id);
+  };
+  return (
+    <div
+      className="row newcat"
+      style={{ flexWrap: 'nowrap' }}
+      // Enter/Escape må ikke boble op til fx gennemgangens "gem og gå videre".
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(); }
+        if (e.key === 'Escape') { e.stopPropagation(); onDone(); }
+      }}
+    >
+      {!fixedKind && (
+        <select className="sm" value={kind} onChange={(e) => { setKind(e.target.value as Category['kind']); setParent(''); }} aria-label="Indtægt eller udgift"
+          title="Begge veje: fx renter eller afkast – positivt beløb er indtægt, negativt er udgift">
+          <option value="expense">Udgift</option>
+          <option value="income">Indtægt</option>
+          <option value="both">Begge veje (fx renter)</option>
+        </select>
+      )}
+      <select className="sm" value={parent} onChange={(e) => setParent(e.target.value)} aria-label="Placering">
+        <option value="">Ny hovedkategori</option>
+        {tops.map((t) => <option key={t.id} value={t.id}>Under {t.name}</option>)}
+      </select>
+      <input className="sm grow" autoFocus placeholder={parent ? 'Navn på underkategori' : 'Navn på kategori'} value={name} onChange={(e) => setName(e.target.value)}
+        style={dup ? { borderColor: 'var(--critical)' } : undefined} title={dup ? 'Findes allerede' : undefined} />
+      <button className="btn sm primary" disabled={!name.trim() || dup} onClick={create}>Opret</button>
+      <button className="btn sm ghost" onClick={() => onDone()} aria-label="Annullér">✕</button>
+    </div>
+  );
+}
+
+const fold = (s: string) => s.toLowerCase().replace(/å/g, 'aa').replace(/æ/g, 'ae').replace(/ø/g, 'oe').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/**
+ * Søgbart kategorivalg. Åbner ved fokus; skriv for at filtrere, ↑/↓ for at flytte,
+ * Enter for at vælge (og evt. gemme og gå videre via onCommit). 1–3 skifter type, når feltet er tomt.
+ */
+export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKind, className, allowClear, placeholder = '— vælg kategori —', ariaLabel = 'Kategori' }: {
+  value?: string;
+  onChange: (id: string | undefined) => void;
+  onCommit?: (id: string) => void;
+  onTypeKey?: (key: string) => void;
+  primaryKind?: 'income' | 'expense';
+  className?: string;
+  /** Vis en "ingen"-mulighed øverst (fx "Ingen standardkategori"). */
+  allowClear?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const { categories } = useData();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const [creating, setCreating] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  type Opt = { id: string; label: string; group: string; isNew?: boolean; isClear?: boolean };
+  const all: Opt[] = useMemo(() => {
+    const kinds: Category['kind'][] = primaryKind === 'income' ? ['income', 'both', 'expense'] : ['expense', 'both', 'income'];
+    const out: Opt[] = [];
+    for (const k of kinds) {
+      const group = k === 'both' ? 'Begge veje' : primaryKind && k !== primaryKind ? (k === 'expense' ? 'Refusion af udgift' : 'Tilbagebetaling af indtægt') : k === 'income' ? 'Indtægter' : 'Udgifter';
+      for (const t of categories.filter((c) => !c.parentId && c.kind === k)) {
+        out.push({ id: t.id, label: t.name, group });
+        for (const c of categories.filter((x) => x.parentId === t.id)) out.push({ id: c.id, label: `${t.name} › ${c.name}`, group });
+      }
+    }
+    return out;
+  }, [categories, primaryKind]);
+  const words = fold(q).split(/\s+/).filter(Boolean);
+  const filtered = words.length ? all.filter((o) => words.every((w) => fold(o.label).includes(w))) : all;
+  const clearOpt: Opt[] = allowClear && !words.length ? [{ id: '__clear__', label: allowClear, group: '', isClear: true }] : [];
+  const opts: Opt[] = [...clearOpt, ...filtered, { id: '__new__', label: q.trim() ? `+ Opret "${q.trim()}" som ny kategori…` : '+ Ny kategori…', group: '', isNew: true }];
+  const current = all.find((o) => o.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [hi, open]);
+
+  const choose = (o: Opt, commit: boolean) => {
+    if (o.isNew) { setCreating(q.trim()); setOpen(false); return; }
+    if (o.isClear) { onChange(undefined); setOpen(false); setQ(''); return; }
+    onChange(o.id);
+    setOpen(false);
+    setQ('');
+    if (commit) onCommit?.(o.id);
+  };
+
+  if (creating !== null) {
+    return (
+      <NewCategoryForm defaultKind={primaryKind} initialName={creating} defaultParent={current ? categories.find((c) => c.id === current.id)?.parentId ?? current.id : undefined}
+        onDone={(id) => { setCreating(null); if (id) onChange(id); setTimeout(() => inputRef.current?.focus(), 0); }} />
+    );
+  }
+
+  return (
+    <div className={`combo ${className ?? ''}`}>
+      <input
+        ref={inputRef}
+        className="combo-input"
+        role="combobox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        placeholder={open ? 'Søg kategori…' : allowClear ?? placeholder}
+        value={open ? q : current?.label ?? ''}
+        onFocus={() => { setOpen(true); setQ(''); setHi(Math.max(0, opts.findIndex((o) => o.id === value))); }}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onChange={(e) => { setQ(e.target.value); setHi(0); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { setOpen(true); e.preventDefault(); return; }
+          if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setHi((h) => Math.min(opts.length - 1, h + 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); setHi((h) => Math.max(0, h - 1)); }
+          else if (e.key === 'Enter') {
+            e.preventDefault(); e.stopPropagation();
+            const o = open ? opts[hi] : current;
+            if (o) choose(o, true);
+            else if (value) onCommit?.(value);
+          } else if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false); setQ(''); } }
+          else if (onTypeKey && q === '' && /^[123]$/.test(e.key)) { e.preventDefault(); onTypeKey(e.key); }
+        }}
+      />
+      {open && (
+        <div className="combo-list" role="listbox" ref={listRef}>
+          {opts.map((o, i) => (
+            <Fragment key={o.id}>
+              {o.group && (i === 0 || opts[i - 1].group !== o.group) && <div className="combo-group">{o.group}</div>}
+              <div
+                data-i={i}
+                role="option"
+                aria-selected={i === hi}
+                className={`combo-opt ${i === hi ? 'hi' : ''} ${o.id === value || (o.isClear && !value) ? 'cur' : ''} ${o.isNew ? 'new' : ''} ${o.isClear ? 'clear' : ''} ${o.label.includes(' › ') ? 'sub' : ''}`}
+                onMouseDown={(e) => { e.preventDefault(); choose(o, false); }}
+                onMouseEnter={() => setHi(i)}
+              >
+                {o.label}{o.id === value && <span className="combo-check">✓</span>}
+              </div>
+            </Fragment>
+          ))}
+          {!filtered.length && <div className="combo-empty">Ingen kategori matcher "{q}"</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function categoryLabel(categories: Category[], id?: string): string {
+  if (!id) return '';
+  const c = categories.find((x) => x.id === id);
+  if (!c) return `(${id})`;
+  const p = c.parentId ? categories.find((x) => x.id === c.parentId) : undefined;
+  return p ? `${p.name} › ${c.name}` : c.name;
+}
+
+export function AccountSelect({ value, onChange, exclude, filter, placeholder = '— vælg konto —', className }: {
+  value?: string;
+  onChange: (id: string | undefined) => void;
+  exclude?: string;
+  filter?: (a: Account) => boolean;
+  placeholder?: string;
+  className?: string;
+}) {
+  const { accounts } = useData();
+  return (
+    <select className={className} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} aria-label="Konto">
+      <option value="">{placeholder}</option>
+      {accounts.filter((a) => a.id !== exclude && !a.archived && (!filter || filter(a))).map((a) => (
+        <option key={a.id} value={a.id}>{a.name}</option>
+      ))}
+    </select>
+  );
+}
+
+/** Type + det der hører til typen (kategori, modpart eller post) – og en sætning om, hvad der sker. */
+export function ClassEditor({ value, onChange, accountId, amount, compact, txId, onCommit }: {
+  value: Classification;
+  onChange: (c: Classification) => void;
+  accountId?: string;
+  amount: number;
+  compact?: boolean;
+  /** Transaktionen der redigeres – så dens egne posteringer ikke tæller med i personens saldo. */
+  txId?: string;
+  /** Enter i kategorisøgningen: vælg OG gem/gå videre (bruges i gennemgangen). */
+  onCommit?: (c: Classification) => void;
+}) {
+  const sm = compact ? 'sm' : '';
+  const { categories } = useData();
+  const signKind = amount > 0 ? 'income' : amount < 0 ? 'expense' : undefined;
+  const isPl = value.type === 'income' || value.type === 'expense';
+  return (
+    <div className="col class-editor-wrap" style={{ gap: 4 }}>
+      <div className="row class-editor">
+        <TypeSeg value={value.type} amount={amount} onChange={(k) => onChange(withTypeKey(value, k, amount, categories))} />
+        {isPl && (
+          <CategoryCombo className={`grow ${sm}`} primaryKind={signKind} value={value.categoryId}
+            onChange={(categoryId) => onChange({ type: plTypeOf(categories.find((c) => c.id === categoryId), amount), categoryId })}
+            onCommit={onCommit && ((categoryId) => onCommit({ type: plTypeOf(categories.find((c) => c.id === categoryId), amount), categoryId }))}
+            onTypeKey={(key) => onChange(withTypeKey(value, TYPE_KEYS[key], amount, categories))} />
+        )}
+        {value.type === 'internal' && (
+          <TargetSelect className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.targetAccountId} onChange={(targetAccountId) => onChange({ ...value, targetAccountId })} />
+        )}
+      </div>
+      <ClassHint value={value} amount={amount} txId={txId} />
+    </div>
+  );
+}
+
+/**
+ * Brugerens egne posttyper + "Ingen type" + "+ Ny type…" (oprettes på stedet).
+ */
+export function TypeSelect({ value, onChange, className }: { value?: string; onChange: (id: string | undefined) => void; className?: string }) {
+  const { accountTypes } = useData();
+  const update = useStore((s) => s.update);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  if (creating) {
+    const create = () => {
+      if (!name.trim()) return;
+      let id = '';
+      update((d) => { const r = addAccountType(d, name); id = r.id; return r.data; });
+      onChange(id);
+      setCreating(false);
+      setName('');
+    };
+    return (
+      <span className="row" style={{ flexWrap: 'nowrap', gap: 4 }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
+        <input className={`sm ${className ?? ''}`} autoFocus placeholder="Ny type, fx Opsparing" value={name} onChange={(e) => setName(e.target.value)} aria-label="Navn på ny type" />
+        <button className="btn sm primary" disabled={!name.trim()} onClick={create}>Opret</button>
+        <button className="btn sm ghost" onClick={() => setCreating(false)} aria-label="Annullér">✕</button>
+      </span>
+    );
+  }
+  return (
+    <select className={className} value={value ?? ''} aria-label="Type" onChange={(e) => (e.target.value === '__new__' ? setCreating(true) : onChange(e.target.value || undefined))}>
+      <option value="">{NO_TYPE}</option>
+      {accountTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      <option value="__new__">+ Ny type…</option>
+    </select>
+  );
+}
+
+/** Hvordan postens saldo findes: følger overførsler eller tastes selv. */
+export function KindSelect({ value, onChange, className }: { value: 'tracked' | 'valuation'; onChange: (k: 'tracked' | 'valuation') => void; className?: string }) {
+  return (
+    <select className={className} value={value} onChange={(e) => onChange(e.target.value as 'tracked' | 'valuation')} aria-label="Saldo">
+      <option value="tracked">{KIND_LABEL.tracked}</option>
+      <option value="valuation">{KIND_LABEL.valuation}</option>
+    </select>
+  );
+}
+
+/** Post på balancen (alle poster i én liste) – med mulighed for at oprette en ny post på stedet. */
+function TargetSelect({ value, onChange, exclude, className, amount }: { value?: string; onChange: (id?: string) => void; exclude?: string; className?: string; amount: number }) {
+  const { accounts, categories } = useData();
+  const update = useStore((s) => s.update);
+  const periodId = useStore((s) => s.periodId);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [typeId, setTypeId] = useState<string | undefined>();
+  const [kind, setKind] = useState<'tracked' | 'valuation'>('tracked');
+  if (creating) {
+    const create = () => {
+      if (!name.trim()) return;
+      const id = uid('acc');
+      // Penge ud til posten → den er typisk noget, du har (aktiv); penge ind → noget, du skylder.
+      const side = amount < 0 ? 'asset' : 'liability';
+      update((d) => withAccountInPeriods({ ...d, accounts: [...d.accounts, { id, name: name.trim(), kind, typeId, side, aliases: [], defaultCategoryId: kind === 'valuation' ? suggestCategory(categories, side) : undefined }] }, id, periodId));
+      onChange(id);
+      setCreating(false);
+      setName('');
+    };
+    return (
+      <div className="row newcat" style={{ flexWrap: 'nowrap' }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
+        <input className="sm grow" autoFocus placeholder={amount < 0 ? 'Fx Jonas skylder mig' : 'Fx Jeg skylder Ida'} value={name} onChange={(e) => setName(e.target.value)} aria-label="Navn på post" />
+        <TypeSelect className="sm" value={typeId} onChange={setTypeId} />
+        <KindSelect className="sm" value={kind} onChange={setKind} />
+        <button className="btn sm primary" disabled={!name.trim()} onClick={create}>Opret</button>
+        <button className="btn sm ghost" onClick={() => setCreating(false)} aria-label="Annullér">✕</button>
+      </div>
+    );
+  }
+  return (
+    <select className={`${className ?? ''} ${value ? '' : 'needs-choice'}`} value={value ?? ''} onChange={(e) => (e.target.value === '__new__' ? setCreating(true) : onChange(e.target.value || undefined))} aria-label="Til/fra">
+      <option value="" disabled>— vælg hvor pengene {amount < 0 ? 'skal hen' : 'kommer fra'} —</option>
+      {accounts.filter((a) => a.id !== exclude && (!a.archived || a.id === value)).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+      <option value="__new__">+ Ny post…</option>
+    </select>
+  );
+}
+
+/** Én sætning om, hvad valget betyder for regnskabet – især for udlæg/gæld. */
+function ClassHint({ value, amount }: { value: Classification; amount: number; txId?: string }) {
+  const { categories, accounts } = useData();
+  if (value.type === 'internal' || value.type === 'outlay') {
+    const t = accounts.find((a) => a.id === value.targetAccountId);
+    const dir = amount < 0 ? 'til' : 'fra';
+    if (!t) return <div className="class-hint">Vælg den post på din balance, pengene flytter {dir} – eller opret en ny.</div>;
+    return <div className="class-hint">Pengene flytter {dir} <b>{t.name}</b>. Hverken indtægt eller udgift.</div>;
+  }
+  const cat = categories.find((c) => c.id === value.categoryId);
+  if (cat?.kind === 'both') return <div className="class-hint"><b>{cat.name}</b> går begge veje – her en {amount >= 0 ? 'indtægt' : 'udgift'}.</div>;
+  if (cat && amount !== 0 && (cat.kind === 'expense') !== amount < 0) {
+    return <div className="class-hint">{amount > 0 ? <>Refusion – <b>trækkes fra udgiften</b> {cat.name}.</> : <>Tilbagebetaling – <b>trækkes fra indtægten</b> {cat.name}.</>}</div>;
+  }
+  return null;
+}
+
+export function SourceChip({ source }: { source: Source }) {
+  const cls = NEEDS_REVIEW.has(source) ? 'review' : source === 'manual' || source === 'rule' || source === 'split' ? 'user' : '';
+  return <span className={`chip ${cls}`}>{SOURCE_LABEL[source]}</span>;
+}
+
+const ICON: Record<Check['level'], string> = { ok: '✓', info: 'i', warn: '!', error: '×' };
+const LEVEL_TXT: Record<Check['level'], string> = { ok: 'OK', info: 'Info', warn: 'Advarsel', error: 'Fejl' };
+
+export function CheckList({ checks }: { checks: Check[] }) {
+  const setView = useStore((s) => s.setView);
+  return (
+    <div>
+      {checks.map((c) => (
+        <div key={c.id} className="check">
+          <span className={`ico ${c.level}`} aria-label={LEVEL_TXT[c.level]}>{ICON[c.level]}</span>
+          <div className="grow">
+            <div>{c.title}</div>
+            {c.detail && <div className="small muted">{c.detail}</div>}
+          </div>
+          {c.view && c.level !== 'ok' && (
+            <button className="btn sm" onClick={() => setView(c.view as View)}>Gå til →</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Formatér et beløb mens man skriver: tusindtalsseparator, komma som decimal, max 2 decimaler. */
+export function formatAmountLive(raw: string): string {
+  const neg = /^\s*[-−]/.test(raw);
+  const cleaned = raw.replace(/[^\d,]/g, '');
+  const [intRaw, ...rest] = cleaned.split(',');
+  const intPart = intRaw.replace(/^0+(?=\d)/, '');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const hasComma = cleaned.includes(',');
+  const dec = rest.join('').slice(0, 2);
+  return `${neg ? '−' : ''}${grouped || (hasComma ? '0' : '')}${hasComma ? ',' + dec : ''}`;
+}
+/** Antal "betydende" tegn (cifre, komma, minus) – bruges til at holde markøren på plads. */
+const sigCount = (s: string) => (s.match(/[\d,−-]/g) ?? []).length;
+
+/**
+ * Beløbsfelt: tusindtalsseparator mens man skriver og "kr" i slutningen.
+ * Gemmer ved Enter eller når feltet forlades.
+ */
+export function AmountInput({ value, onCommit, className, placeholder, ariaLabel, autoFocus }: {
+  value?: number;
+  onCommit: (v: number | undefined) => void;
+  className?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+  autoFocus?: boolean;
+}) {
+  const fmt = (v?: number) => (v === undefined ? '' : kr2f(v).replace('-', '−'));
+  const [txt, setTxt] = useState(fmt(value));
+  const [focused, setFocused] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const shown = focused ? txt : fmt(value);
+  const bad = txt.trim() !== '' && parseAmount(txt) === null;
+  return (
+    <span className={`amount-wrap ${shown ? 'has-value' : ''}`}>
+      <input
+        ref={ref}
+        className={`num ${className ?? ''}`}
+        style={bad ? { borderColor: 'var(--critical)' } : undefined}
+        value={shown}
+        inputMode="decimal"
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        autoFocus={autoFocus}
+        onFocus={(e) => { setTxt(fmt(value)); setFocused(true); const el = e.currentTarget; setTimeout(() => el.select(), 0); }}
+        onChange={(e) => {
+          const el = e.target;
+          const caret = el.selectionStart ?? el.value.length;
+          const before = sigCount(el.value.slice(0, caret));
+          const next = formatAmountLive(el.value);
+          setTxt(next);
+          // Sæt markøren efter samme antal betydende tegn som før formateringen.
+          requestAnimationFrame(() => {
+            if (!ref.current) return;
+            let pos = 0, n = 0;
+            while (pos < next.length && n < before) { if (/[\d,−-]/.test(next[pos])) n++; pos++; }
+            ref.current.setSelectionRange(pos, pos);
+          });
+        }}
+        onBlur={() => {
+          setFocused(false);
+          if (txt.trim() === '') onCommit(undefined);
+          else { const v = parseAmount(txt.replace('−', '-')); if (v !== null) onCommit(v); }
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      />
+      <span className="amount-suffix" aria-hidden>kr</span>
+    </span>
+  );
+}
+
+export function Empty({ children }: { children: ReactNode }) {
+  return <div className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>{children}</div>;
+}
+
+export function Tile({ label, value, delta, deltaGood }: { label: string; value: ReactNode; delta?: ReactNode; deltaGood?: boolean }) {
+  return (
+    <div className="tile">
+      <div className="lbl">{label}</div>
+      <div className="val num" style={{ textAlign: 'left' }}>{value}</div>
+      {delta !== undefined && <div className={`delta ${deltaGood === undefined ? 'muted' : deltaGood ? 'pos' : 'neg'}`}>{delta}</div>}
+    </div>
+  );
+}
+
+/**
+ * Bankens kommentar (importeret, kan ikke rettes) og din egen note (kan rettes) – vist forskelligt,
+ * så det altid er tydeligt, hvem der har skrevet hvad.
+ */
+export function TxNotes({ tx }: { tx: Tx }) {
+  const [editing, setEditing] = useState(false);
+  const [txt, setTxt] = useState(tx.memo ?? '');
+  const save = () => { setMemo(tx.id, txt); setEditing(false); };
+  return (
+    <div className="tx-notes">
+      {tx.note && <div className="bank-note" title="Kommentar fra din netbank (importeret)">❝ {tx.note} <span className="src">fra banken</span></div>}
+      {editing ? (
+        <input
+          className="sm memo-input"
+          autoFocus
+          value={txt}
+          placeholder="Din note – fx hvem var med, hvad det var til"
+          onChange={(ev) => setTxt(ev.target.value)}
+          onBlur={save}
+          onKeyDown={(ev) => {
+            ev.stopPropagation(); // Enter må ikke gemme/gå videre i gennemgangen
+            if (ev.key === 'Enter') save();
+            if (ev.key === 'Escape') { setTxt(tx.memo ?? ''); setEditing(false); }
+          }}
+          aria-label="Din note"
+        />
+      ) : tx.memo ? (
+        <button className="memo" title="Din note – klik for at rette" onClick={() => { setTxt(tx.memo ?? ''); setEditing(true); }}>✎ {tx.memo}</button>
+      ) : (
+        <button className="add-memo" onClick={() => { setTxt(''); setEditing(true); }}>+ Note</button>
+      )}
+    </div>
+  );
+}
+
+/** Er klassifikationen komplet? Intern kræver en valgt post; indtægt/udgift kræver en kategori. */
+export const isComplete = (c: Classification) => (c.type === 'internal' ? !!c.targetAccountId : c.type === 'outlay' || !!c.categoryId);
+
+/** Kommentar på en aktiv/passiv – vises under navnet, rettes ved klik, "+ Kommentar" ved hover. */
+export function AccountNote({ account }: { account: Account }) {
+  const update = useStore((s) => s.update);
+  const periodId = useStore((s) => s.periodId);
+  const note = noteFor(account, periodId);
+  const [editing, setEditing] = useState(false);
+  const [txt, setTxt] = useState(note ?? '');
+  const save = () => {
+    const v = txt.trim();
+    if (periodId) update((d) => ({ ...d, accounts: d.accounts.map((a) => {
+      if (a.id !== account.id) return a;
+      const notes = { ...a.notes };
+      if (v) notes[periodId] = v; else delete notes[periodId];
+      return { ...a, notes };
+    }) }));
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <input className="sm memo-input" autoFocus value={txt} placeholder="Kommentar til posten" aria-label={`Kommentar til ${account.name}`}
+        onChange={(e) => setTxt(e.target.value)} onBlur={save}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') save(); if (e.key === 'Escape') { setTxt(note ?? ''); setEditing(false); } }} />
+    );
+  }
+  // Uden kommentar: en diskret knap på samme linje som navnet (fylder ingen ekstra højde).
+  if (!note) {
+    return <span className="tx-notes inline"><button className="add-memo" onClick={(e) => { e.stopPropagation(); setTxt(''); setEditing(true); }}>+ Kommentar</button></span>;
+  }
+  return (
+    <div className="tx-notes">
+      <button className="memo" title="Kommentar – klik for at rette" onClick={(e) => { e.stopPropagation(); setTxt(note ?? ''); setEditing(true); }}>✎ {note}</button>
+    </div>
+  );
+}
+
+/** "heraf afkast 700 kr" – hvad en værdipost har bidraget med i resultatet i perioden. */
+export function ResultParts({ parts, categories }: { parts: Map<string, number>; categories: Category[] }) {
+  const items = [...parts.entries()].filter(([, v]) => Math.round(v / 100) !== 0);
+  if (!items.length) return null;
+  return (
+    <div className="result-part">
+      {items.map(([ref, v]) => {
+        const name = ref.startsWith('cat:') ? categoryLabel(categories, ref.slice(4)) : 'ukategoriseret';
+        return <div key={ref}>heraf {name} {kr(Math.abs(v))}</div>;
+      })}
+    </div>
+  );
+}

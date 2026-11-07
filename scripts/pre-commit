@@ -1,0 +1,19 @@
+#!/bin/sh
+# Blokerer commits, der indeholder ord fra .private-terms (én udvidet regex pr. linje, ikke versioneret).
+# Installér:  ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+terms="$(git rev-parse --show-toplevel)/.private-terms"
+[ -f "$terms" ] || exit 0
+patterns=$(grep -v '^\s*#' "$terms" | grep -v '^\s*$')
+[ -n "$patterns" ] || exit 0
+tmp=$(mktemp)
+printf '%s\n' "$patterns" > "$tmp"
+hits=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++' | grep -i -E -f "$tmp")
+names=$(git diff --cached --name-only | grep -i -E -f "$tmp")
+rm -f "$tmp"
+if [ -n "$hits$names" ]; then
+  echo "pre-commit: commit indeholder private ord fra .private-terms:" >&2
+  [ -n "$names" ] && echo "$names" | sed 's/^/  fil: /' >&2
+  [ -n "$hits" ] && echo "$hits" | cut -c1-160 | sed 's/^/  /' >&2
+  exit 1
+fi
+exit 0

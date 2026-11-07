@@ -1,0 +1,10 @@
+node_modules
+dist
+*.local
+# Bankdata og backups skal aldrig i git
+data/
+*.csv
+finstate-backup*.json
+
+# Lokal liste over private ord til pre-commit-hooken
+.private-terms
