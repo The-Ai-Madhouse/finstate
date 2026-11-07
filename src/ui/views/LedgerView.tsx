@@ -62,7 +62,10 @@ function LedgerInner() {
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq)), [data, onlyPeriod, period, accountId]);
   const txs = useMemo(() => {
     const nq = q.trim().toLowerCase();
-    return nq ? scope.filter((t) => t.text.toLowerCase().includes(nq) || (t.bankCategory ?? '').toLowerCase().includes(nq) || String(t.amount / 100).includes(nq)) : scope;
+    // Tekst, bankens kategori, din egen note, bankens kommentar og beløb.
+    const hit = (t: Tx) =>
+      [t.text, t.bankCategory, t.bankSubcategory, t.memo, t.note].some((x) => (x ?? '').toLowerCase().includes(nq)) || String(t.amount / 100).includes(nq);
+    return nq ? scope.filter(hit) : scope;
   }, [scope, q]);
 
   const review = txs.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source));
@@ -76,7 +79,7 @@ function LedgerInner() {
         <h1>Kategorisér</h1>
         <span className="spacer" />
         <AccountSelect value={accountId} onChange={setAccountId} placeholder="Alle konti" filter={(a) => a.kind === 'bank'} />
-        <input placeholder="Søg tekst, kategori, beløb…" value={q} onChange={(ev) => setQ(ev.target.value)} style={{ width: 220 }} />
+        <input placeholder="Søg tekst, note, kategori, beløb…" value={q} onChange={(ev) => setQ(ev.target.value)} style={{ width: 220 }} />
         <label className="row small ink2"><input type="checkbox" checked={onlyPeriod} onChange={(ev) => setOnlyPeriod(ev.target.checked)} /> Kun {period?.name ?? 'periode'}</label>
       </div>
       {!data.categories.length && (
