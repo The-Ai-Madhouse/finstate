@@ -148,6 +148,8 @@ export interface Period {
   balanceConfirmed?: boolean;
   /** Poster i periodens balance (kopieres fra forrige periode). Poster med en saldo vises altid. */
   accountIds?: string[];
+  /** Bankkonti hvor brugeren har accepteret, at data ikke dækker hele perioden (fx lukket konto). */
+  coverageOk?: string[];
 }
 
 /** Brugerens egne posttyper (fx "Opsparing", "Lån"). "Ingen type" er altid en mulighed. */

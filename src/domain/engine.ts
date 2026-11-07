@@ -74,7 +74,7 @@ export function periodChecks(e: Engine, p: Period): Check[] {
       continue;
     }
     const last = accTx[accTx.length - 1].date;
-    if (last < p.end && dayDiff(last, p.end) > 14) {
+    if (last < p.end && dayDiff(last, p.end) > 14 && !p.coverageOk?.includes(acc.id)) {
       out.push({ id: `cover-${acc.id}`, level: 'info', title: `${acc.name}: sidste transaktion er ${last}`, detail: 'Importér evt. en nyere eksport, hvis kontoen har haft bevægelser siden.', view: 'import' });
     }
     const breaks = chain.breaks.filter((b) => inPeriod(b, p));
@@ -181,6 +181,8 @@ export interface Coverage {
   coversStart: boolean;
   /** Data når frem til ~2 uger før periodens slutning (eller i dag, hvis perioden ikke er slut). */
   coversEnd: boolean;
+  /** Brugeren har accepteret, at data ikke dækker hele perioden – ingen advarsel. */
+  accepted: boolean;
 }
 
 /** Dækker de importerede bankdata perioden – for hver bankkonto? */
@@ -202,6 +204,7 @@ export function importCoverage(data: AppData, p: Period, today = new Date().toIS
         last,
         coversStart: !!first && !!last && first <= addDays(p.start, 14) && last >= addDays(p.start, -1),
         coversEnd: !!last && last >= addDays(effectiveEnd, -14),
+        accepted: !!p.coverageOk?.includes(a.id),
       };
     });
 }

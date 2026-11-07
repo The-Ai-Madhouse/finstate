@@ -14,7 +14,7 @@ import { usePeriod } from '../../store/actions';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { importCoverage } from '../../domain/engine';
 import { dateDa } from '../../domain/format';
-import { AccountSelect, Empty, Money } from '../components/common';
+import { AccountSelect, Empty, Money, SearchCombo } from '../components/common';
 
 interface Pending {
   key: string;
@@ -33,6 +33,17 @@ function CoverageCard() {
   const data = useStore((s) => s.data);
   const period = usePeriod()!;
   const cov = importCoverage(data, period);
+  const update = useStore((s) => s.update);
+  // Manglende data er ikke nødvendigvis en fejl (fx en konto, der er lukket) – brugeren kan acceptere det.
+  const setAccepted = (accountId: string, ok: boolean) =>
+    update((d) => ({
+      ...d,
+      periods: d.periods.map((p) => {
+        if (p.id !== period.id) return p;
+        const rest = (p.coverageOk ?? []).filter((id) => id !== accountId);
+        return { ...p, coverageOk: ok ? [...rest, accountId] : rest };
+      }),
+    }));
   return (
     <div className="card">
       <h2>Data til {period.name}</h2>
@@ -52,7 +63,17 @@ function CoverageCard() {
                 <td>{c.last ?? '–'}</td>
                 <td>
                   {c.coversStart && c.coversEnd ? <span className="chip user">✓ Ja</span>
-                    : <span className="chip review">{!c.first ? 'Ingen data' : !c.coversStart ? `Mangler data før ${c.first}` : `Mangler data efter ${c.last}`}</span>}
+                    : c.accepted ? (
+                      <span className="row" style={{ gap: 6 }}>
+                        <span className="chip" title="Du har markeret, at det er i orden">✓ OK ({!c.first ? 'ingen data' : !c.coversStart ? `fra ${c.first}` : `til ${c.last}`})</span>
+                        <button className="btn sm ghost" onClick={() => setAccepted(c.accountId, false)}>Fortryd</button>
+                      </span>
+                    ) : (
+                      <span className="row" style={{ gap: 6 }}>
+                        <span className="chip review">{!c.first ? 'Ingen data' : !c.coversStart ? `Mangler data før ${c.first}` : `Mangler data efter ${c.last}`}</span>
+                        <button className="btn sm ghost" title="Fx hvis kontoen er lukket eller ikke har haft bevægelser – advarslen forsvinder for denne periode" onClick={() => setAccepted(c.accountId, true)}>Det er i orden</button>
+                      </span>
+                    )}
                 </td>
               </tr>
             ))}
@@ -166,10 +187,9 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
     onChange({ ...p, mapping: m });
   };
   const colSelect = (k: keyof ColumnMapping, value: number | undefined, optional: boolean) => (
-    <select className="sm" value={value ?? ''} onChange={(e) => setCol(k, e.target.value)}>
-      <option value="">{optional ? '— bruges ikke —' : '— vælg —'}</option>
-      {p.sheet.header.map((h, i) => <option key={i} value={i}>{h || `Kolonne ${i + 1}`}</option>)}
-    </select>
+    <SearchCombo className="sm" options={p.sheet.header.map((h, i) => ({ id: String(i), label: h || `Kolonne ${i + 1}`, hint: p.sheet.rows[0]?.[i] ? `· fx ${p.sheet.rows[0][i].slice(0, 24)}` : undefined }))}
+      value={value === undefined ? undefined : String(value)} allowClear={optional ? '— bruges ikke —' : undefined} placeholder="— vælg —"
+      searchPlaceholder="Søg kolonne…" ariaLabel={`Kolonne: ${k}`} emptyText="Ingen kolonne matcher" onChange={(id) => setCol(k, id ?? '')} />
   );
 
   const doImport = () => {

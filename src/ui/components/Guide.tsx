@@ -37,7 +37,7 @@ function buildSteps(e: Engine, period: Period | undefined, update: ReturnType<ty
   const txInPeriod = period ? data.txs.filter((t) => inPeriod(t, period) && t.date > data.settings.bookStart) : [];
   const review = txInPeriod.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source)).length;
   const coverage = period ? importCoverage(data, period) : [];
-  const uncovered = coverage.filter((c) => !c.coversStart || !c.coversEnd);
+  const uncovered = coverage.filter((c) => (!c.coversStart || !c.coversEnd) && !c.accepted);
   const valuations = data.accounts.filter((a) => a.kind === 'valuation' && (period?.accountIds ? period.accountIds.includes(a.id) : !a.archived));
   const missingVal = period ? valuations.filter((a) => !data.valuations.some((v) => v.accountId === a.id && v.date === period.end)) : valuations;
   const setPeriodFlag = (patch: Partial<Period>) =>

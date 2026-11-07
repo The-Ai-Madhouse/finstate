@@ -7,7 +7,7 @@ import type { Account, Period, Valuation } from '../../domain/types';
 import { addDays, uid } from '../../domain/util';
 import { deleteAccount, deleteImpact, moveAccount, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, TypeSelect } from '../components/common';
+import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, SearchCombo, TypeSelect } from '../components/common';
 import { valuationResultInPeriod } from '../../domain/ledger';
 import { BalanceSourcesDialog } from '../components/SourcesDialog';
 
@@ -347,10 +347,8 @@ function AddRow({ side, period, onAdded }: { side: 'asset' | 'liability'; period
           <div className="row">
             <button className="btn sm ghost" onClick={() => setActive(true)}>+ Tilføj {side === 'asset' ? 'aktiv' : 'passiv'}</button>
             {missing.length > 0 && (
-              <select className="sm" value="" onChange={(ev) => ev.target.value && addExisting(ev.target.value)} aria-label="Tilføj eksisterende post">
-                <option value="">Tilføj eksisterende post…</option>
-                {missing.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
+              <SearchCombo className="sm" options={missing.map((a) => ({ id: a.id, label: a.name }))} value={undefined} onChange={(id) => id && addExisting(id)}
+                placeholder="Tilføj eksisterende post…" searchPlaceholder="Søg post…" ariaLabel="Tilføj eksisterende post" emptyText="Ingen post matcher" />
             )}
             {side === 'asset' && <span className="small muted">Bankkonti oprettes, når du <button className="linkish" onClick={() => setView('import')}>importerer</button> deres transaktioner.</span>}
           </div>

@@ -110,50 +110,51 @@ function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, 
   );
 }
 
-const fold = (s: string) => s.toLowerCase().replace(/å/g, 'aa').replace(/æ/g, 'ae').replace(/ø/g, 'oe').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const fold = (s: string) => s.toLowerCase().replace(/å/g, 'aa').replace(/æ/g, 'ae').replace(/ø/g, 'oe').normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+export type ComboOption = { id: string; label: string; group?: string; sub?: boolean; hint?: string };
 
 /**
- * Søgbart kategorivalg. Åbner ved fokus; skriv for at filtrere, ↑/↓ for at flytte,
- * Enter for at vælge (og evt. gemme og gå videre via onCommit). 1–3 skifter type, når feltet er tomt.
+ * Søgbar dropdown – samme adfærd overalt: åbner ved fokus, skriv for at filtrere, ↑/↓ for at flytte,
+ * Enter for at vælge (og evt. gemme/gå videre via onCommit). Valgfrit: en "ingen"-mulighed øverst og "+ Opret …" nederst.
  */
-export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKind, className, allowClear, placeholder = '— vælg kategori —', ariaLabel = 'Kategori' }: {
+export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onCreate, createLabel, allowClear, placeholder = '— vælg —', searchPlaceholder = 'Søg…', ariaLabel, className, inputRef: extRef, emptyText = 'Intet matcher', needsChoice }: {
+  options: ComboOption[];
   value?: string;
   onChange: (id: string | undefined) => void;
   onCommit?: (id: string) => void;
+  /** 1–3 i et tomt felt (bruges til at skifte type i kategoriseringen). */
   onTypeKey?: (key: string) => void;
-  primaryKind?: 'income' | 'expense';
-  className?: string;
-  /** Vis en "ingen"-mulighed øverst (fx "Ingen standardkategori"). */
+  /** "+ Opret …" nederst – får søgeteksten med. */
+  onCreate?: (q: string) => void;
+  createLabel?: (q: string) => string;
+  /** Vis en "ingen"-mulighed øverst med denne tekst. */
   allowClear?: string;
   placeholder?: string;
-  ariaLabel?: string;
+  searchPlaceholder?: string;
+  ariaLabel: string;
+  className?: string;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  emptyText?: string;
+  /** Markér feltet som "skal udfyldes", når intet er valgt. */
+  needsChoice?: boolean;
 }) {
-  const { categories } = useData();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
-  const [creating, setCreating] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ownRef = useRef<HTMLInputElement>(null);
+  const inputRef = extRef ?? ownRef;
 
-  type Opt = { id: string; label: string; group: string; isNew?: boolean; isClear?: boolean };
-  const all: Opt[] = useMemo(() => {
-    const kinds: Category['kind'][] = primaryKind === 'income' ? ['income', 'both', 'expense'] : ['expense', 'both', 'income'];
-    const out: Opt[] = [];
-    for (const k of kinds) {
-      const group = k === 'both' ? 'Begge veje' : primaryKind && k !== primaryKind ? (k === 'expense' ? 'Refusion af udgift' : 'Tilbagebetaling af indtægt') : k === 'income' ? 'Indtægter' : 'Udgifter';
-      for (const t of categories.filter((c) => !c.parentId && c.kind === k)) {
-        out.push({ id: t.id, label: t.name, group });
-        for (const c of categories.filter((x) => x.parentId === t.id)) out.push({ id: c.id, label: `${t.name} › ${c.name}`, group });
-      }
-    }
-    return out;
-  }, [categories, primaryKind]);
+  type Opt = ComboOption & { isNew?: boolean; isClear?: boolean };
   const words = fold(q).split(/\s+/).filter(Boolean);
-  const filtered = words.length ? all.filter((o) => words.every((w) => fold(o.label).includes(w))) : all;
-  const clearOpt: Opt[] = allowClear && !words.length ? [{ id: '__clear__', label: allowClear, group: '', isClear: true }] : [];
-  const opts: Opt[] = [...clearOpt, ...filtered, { id: '__new__', label: q.trim() ? `+ Opret "${q.trim()}" som ny kategori…` : '+ Ny kategori…', group: '', isNew: true }];
-  const current = all.find((o) => o.id === value);
+  const filtered = words.length ? options.filter((o) => words.every((w) => fold(`${o.group ?? ''} ${o.label}`).includes(w))) : options;
+  const opts: Opt[] = [
+    ...(allowClear && !words.length ? [{ id: '__clear__', label: allowClear, isClear: true }] : []),
+    ...filtered,
+    ...(onCreate ? [{ id: '__new__', label: createLabel ? createLabel(q.trim()) : q.trim() ? `+ Opret "${q.trim()}"…` : '+ Opret ny…', isNew: true }] : []),
+  ];
+  const current = options.find((o) => o.id === value);
 
   useEffect(() => {
     if (!open) return;
@@ -161,32 +162,25 @@ export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKin
   }, [hi, open]);
 
   const choose = (o: Opt, commit: boolean) => {
-    if (o.isNew) { setCreating(q.trim()); setOpen(false); return; }
-    if (o.isClear) { onChange(undefined); setOpen(false); setQ(''); return; }
-    onChange(o.id);
     setOpen(false);
     setQ('');
+    if (o.isNew) { onCreate?.(q.trim()); return; }
+    if (o.isClear) { onChange(undefined); return; }
+    onChange(o.id);
     if (commit) onCommit?.(o.id);
   };
-
-  if (creating !== null) {
-    return (
-      <NewCategoryForm defaultKind={primaryKind} initialName={creating} defaultParent={current ? categories.find((c) => c.id === current.id)?.parentId ?? current.id : undefined}
-        onDone={(id) => { setCreating(null); if (id) onChange(id); setTimeout(() => inputRef.current?.focus(), 0); }} />
-    );
-  }
 
   return (
     <div className={`combo ${className ?? ''}`}>
       <input
         ref={inputRef}
-        className="combo-input"
+        className={`combo-input ${needsChoice && !value ? 'needs-choice' : ''}`}
         role="combobox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        placeholder={open ? 'Søg kategori…' : allowClear ?? placeholder}
+        placeholder={open ? searchPlaceholder : allowClear ?? placeholder}
         value={open ? q : current?.label ?? ''}
-        onFocus={() => { setOpen(true); setQ(''); setHi(Math.max(0, opts.findIndex((o) => o.id === value))); }}
+        onFocus={() => { setOpen(true); setQ(''); setHi(Math.max(0, opts.findIndex((o) => o.id === value || (o.isClear && !value)))); }}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onChange={(e) => { setQ(e.target.value); setHi(0); setOpen(true); }}
         onKeyDown={(e) => {
@@ -211,18 +205,63 @@ export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKin
                 data-i={i}
                 role="option"
                 aria-selected={i === hi}
-                className={`combo-opt ${i === hi ? 'hi' : ''} ${o.id === value || (o.isClear && !value) ? 'cur' : ''} ${o.isNew ? 'new' : ''} ${o.isClear ? 'clear' : ''} ${o.label.includes(' › ') ? 'sub' : ''}`}
+                className={`combo-opt ${i === hi ? 'hi' : ''} ${o.id === value || (o.isClear && !value) ? 'cur' : ''} ${o.isNew ? 'new' : ''} ${o.isClear ? 'clear' : ''} ${o.sub ? 'sub' : ''}`}
                 onMouseDown={(e) => { e.preventDefault(); choose(o, false); }}
                 onMouseEnter={() => setHi(i)}
               >
-                {o.label}{o.id === value && <span className="combo-check">✓</span>}
+                <span>{o.label}{o.hint && <span className="combo-hint"> {o.hint}</span>}</span>{(o.id === value || (o.isClear && !value)) && <span className="combo-check">✓</span>}
               </div>
             </Fragment>
           ))}
-          {!filtered.length && <div className="combo-empty">Ingen kategori matcher "{q}"</div>}
+          {!filtered.length && words.length > 0 && <div className="combo-empty">{emptyText} "{q}"</div>}
         </div>
       )}
     </div>
+  );
+}
+
+/** Søgbart kategorivalg (bygger på SearchCombo) – med "+ Ny kategori…" på stedet. */
+export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKind, className, allowClear, placeholder = '— vælg kategori —', ariaLabel = 'Kategori' }: {
+  value?: string;
+  onChange: (id: string | undefined) => void;
+  onCommit?: (id: string) => void;
+  onTypeKey?: (key: string) => void;
+  primaryKind?: 'income' | 'expense';
+  className?: string;
+  /** Vis en "ingen"-mulighed øverst (fx "Ukategoriseret"). */
+  allowClear?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const { categories } = useData();
+  const [creating, setCreating] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const options: ComboOption[] = useMemo(() => {
+    const kinds: Category['kind'][] = primaryKind === 'income' ? ['income', 'both', 'expense'] : ['expense', 'both', 'income'];
+    const out: ComboOption[] = [];
+    for (const k of kinds) {
+      const group = k === 'both' ? 'Begge veje' : primaryKind && k !== primaryKind ? (k === 'expense' ? 'Refusion af udgift' : 'Tilbagebetaling af indtægt') : k === 'income' ? 'Indtægter' : 'Udgifter';
+      for (const t of categories.filter((c) => !c.parentId && c.kind === k)) {
+        out.push({ id: t.id, label: t.name, group });
+        for (const c of categories.filter((x) => x.parentId === t.id)) out.push({ id: c.id, label: `${t.name} › ${c.name}`, group, sub: true });
+      }
+    }
+    return out;
+  }, [categories, primaryKind]);
+
+  if (creating !== null) {
+    const cur = categories.find((c) => c.id === value);
+    return (
+      <NewCategoryForm defaultKind={primaryKind} initialName={creating} defaultParent={cur ? cur.parentId ?? cur.id : undefined}
+        onDone={(id) => { setCreating(null); if (id) onChange(id); setTimeout(() => inputRef.current?.focus(), 0); }} />
+    );
+  }
+  return (
+    <SearchCombo className={className} options={options} value={value} onChange={onChange} onCommit={onCommit} onTypeKey={onTypeKey}
+      allowClear={allowClear} placeholder={placeholder} searchPlaceholder="Søg kategori…" ariaLabel={ariaLabel} inputRef={inputRef}
+      emptyText="Ingen kategori matcher"
+      onCreate={(q) => setCreating(q)} createLabel={(q) => (q ? `+ Opret "${q}" som ny kategori…` : '+ Ny kategori…')} />
   );
 }
 
@@ -243,14 +282,8 @@ export function AccountSelect({ value, onChange, exclude, filter, placeholder = 
   className?: string;
 }) {
   const { accounts } = useData();
-  return (
-    <select className={className} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} aria-label="Konto">
-      <option value="">{placeholder}</option>
-      {accounts.filter((a) => a.id !== exclude && !a.archived && (!filter || filter(a))).map((a) => (
-        <option key={a.id} value={a.id}>{a.name}</option>
-      ))}
-    </select>
-  );
+  const options = accounts.filter((a) => a.id !== exclude && (!a.archived || a.id === value) && (!filter || filter(a))).map((a) => ({ id: a.id, label: a.name }));
+  return <SearchCombo className={className} options={options} value={value} onChange={onChange} allowClear={placeholder} searchPlaceholder="Søg konto…" ariaLabel="Konto" emptyText="Ingen konto matcher" />;
 }
 
 /** Type + det der hører til typen (kategori, modpart eller post) – og en sætning om, hvad der sker. */
@@ -280,7 +313,9 @@ export function ClassEditor({ value, onChange, accountId, amount, compact, txId,
             onTypeKey={(key) => onChange(withTypeKey(value, TYPE_KEYS[key], amount, categories))} />
         )}
         {value.type === 'internal' && (
-          <TargetSelect className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.targetAccountId} onChange={(targetAccountId) => onChange({ ...value, targetAccountId })} />
+          <TargetSelect className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.targetAccountId} onChange={(targetAccountId) => onChange({ ...value, targetAccountId })}
+            onCommit={onCommit && ((targetAccountId) => onCommit({ ...value, targetAccountId }))}
+            onTypeKey={(key) => onChange(withTypeKey(value, TYPE_KEYS[key], amount, categories))} />
         )}
       </div>
       <ClassHint value={value} amount={amount} txId={txId} />
@@ -296,30 +331,29 @@ export function TypeSelect({ value, onChange, className }: { value?: string; onC
   const update = useStore((s) => s.update);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  const create = (n: string) => {
+    if (!n.trim()) return;
+    let id = '';
+    update((d) => { const r = addAccountType(d, n); id = r.id; return r.data; });
+    onChange(id);
+    setCreating(false);
+    setName('');
+  };
   if (creating) {
-    const create = () => {
-      if (!name.trim()) return;
-      let id = '';
-      update((d) => { const r = addAccountType(d, name); id = r.id; return r.data; });
-      onChange(id);
-      setCreating(false);
-      setName('');
-    };
     return (
       <span className="row" style={{ flexWrap: 'nowrap', gap: 4 }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(name); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
         <input className={`sm ${className ?? ''}`} autoFocus placeholder="Ny type, fx Opsparing" value={name} onChange={(e) => setName(e.target.value)} aria-label="Navn på ny type" />
-        <button className="btn sm primary" disabled={!name.trim()} onClick={create}>Opret</button>
+        <button className="btn sm primary" disabled={!name.trim()} onClick={() => create(name)}>Opret</button>
         <button className="btn sm ghost" onClick={() => setCreating(false)} aria-label="Annullér">✕</button>
       </span>
     );
   }
   return (
-    <select className={className} value={value ?? ''} aria-label="Type" onChange={(e) => (e.target.value === '__new__' ? setCreating(true) : onChange(e.target.value || undefined))}>
-      <option value="">{NO_TYPE}</option>
-      {accountTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-      <option value="__new__">+ Ny type…</option>
-    </select>
+    <SearchCombo className={`${className ?? ''} combo-narrow`} options={accountTypes.map((t) => ({ id: t.id, label: t.name }))} value={value} onChange={onChange}
+      allowClear={NO_TYPE} searchPlaceholder="Søg eller skriv ny type…" ariaLabel="Type" emptyText="Ingen type matcher"
+      // Har man skrevet et navn, oprettes typen med det samme.
+      onCreate={(q) => (q ? create(q) : setCreating(true))} createLabel={(q) => (q ? `+ Opret typen "${q}"` : '+ Ny type…')} />
   );
 }
 
@@ -333,15 +367,24 @@ export function KindSelect({ value, onChange, className }: { value: 'tracked' | 
   );
 }
 
-/** Post på balancen (alle poster i én liste) – med mulighed for at oprette en ny post på stedet. */
-function TargetSelect({ value, onChange, exclude, className, amount }: { value?: string; onChange: (id?: string) => void; exclude?: string; className?: string; amount: number }) {
-  const { accounts, categories } = useData();
+/** Post på balancen (alle poster i én søgbar liste) – med mulighed for at oprette en ny post på stedet. */
+function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className, amount }: {
+  value?: string;
+  onChange: (id?: string) => void;
+  onCommit?: (id: string) => void;
+  onTypeKey?: (key: string) => void;
+  exclude?: string;
+  className?: string;
+  amount: number;
+}) {
+  const { accounts, accountTypes, categories } = useData();
   const update = useStore((s) => s.update);
   const periodId = useStore((s) => s.periodId);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [typeId, setTypeId] = useState<string | undefined>();
   const [kind, setKind] = useState<'tracked' | 'valuation'>('tracked');
+  const inputRef = useRef<HTMLInputElement>(null);
   if (creating) {
     const create = () => {
       if (!name.trim()) return;
@@ -352,9 +395,10 @@ function TargetSelect({ value, onChange, exclude, className, amount }: { value?:
       onChange(id);
       setCreating(false);
       setName('');
+      setTimeout(() => inputRef.current?.focus(), 0);
     };
     return (
-      <div className="row newcat" style={{ flexWrap: 'nowrap' }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
+      <div className="row newcat" style={{ flexWrap: 'nowrap' }} onKeyDown={(e) => { if (e.key === 'Enter' && (e.target as HTMLElement).getAttribute('role') !== 'combobox') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
         <input className="sm grow" autoFocus placeholder={amount < 0 ? 'Fx Jonas skylder mig' : 'Fx Jeg skylder Ida'} value={name} onChange={(e) => setName(e.target.value)} aria-label="Navn på post" />
         <TypeSelect className="sm" value={typeId} onChange={setTypeId} />
         <KindSelect className="sm" value={kind} onChange={setKind} />
@@ -363,12 +407,15 @@ function TargetSelect({ value, onChange, exclude, className, amount }: { value?:
       </div>
     );
   }
+  const typeOf = (a: Account) => accountTypes.find((t) => t.id === a.typeId)?.name;
+  const options = accounts
+    .filter((a) => a.id !== exclude && (!a.archived || a.id === value))
+    .map((a) => ({ id: a.id, label: a.name, hint: typeOf(a) ? `· ${typeOf(a)}` : undefined }));
   return (
-    <select className={`${className ?? ''} ${value ? '' : 'needs-choice'}`} value={value ?? ''} onChange={(e) => (e.target.value === '__new__' ? setCreating(true) : onChange(e.target.value || undefined))} aria-label="Til/fra">
-      <option value="" disabled>— vælg hvor pengene {amount < 0 ? 'skal hen' : 'kommer fra'} —</option>
-      {accounts.filter((a) => a.id !== exclude && (!a.archived || a.id === value)).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-      <option value="__new__">+ Ny post…</option>
-    </select>
+    <SearchCombo className={className} options={options} value={value} onChange={onChange} onCommit={onCommit} onTypeKey={onTypeKey} inputRef={inputRef}
+      placeholder={`— hvor ${amount < 0 ? 'skal pengene hen' : 'kommer pengene fra'}? —`} searchPlaceholder="Søg post…" ariaLabel="Til/fra" needsChoice
+      emptyText="Ingen post matcher"
+      onCreate={(q) => { setName(q); setCreating(true); }} createLabel={(q) => (q ? `+ Opret "${q}" som ny post…` : '+ Ny post…')} />
   );
 }
 

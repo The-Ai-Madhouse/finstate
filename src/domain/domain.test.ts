@@ -195,6 +195,10 @@ describe('importdækning', () => {
     const cov = importCoverage(d, later, '2027-02-01');
     expect(cov.every((c) => !c.coversEnd && !c.coversStart)).toBe(true);
     expect(importCoverage(d, h1)[0].coversEnd).toBe(true);
+    // Manglende data kan accepteres pr. periode og konto (fx en lukket konto).
+    const ok = importCoverage(d, { ...later, coverageOk: ['acc-loen'] }, '2027-02-01');
+    expect(ok.find((c) => c.accountId === 'acc-loen')!.accepted).toBe(true);
+    expect(ok.find((c) => c.accountId === 'acc-ops')!.accepted).toBe(false);
   });
 });
 

@@ -10,7 +10,7 @@ import { download, useEngine, usePeriod } from '../../store/actions';
 import { useData, useStore } from '../../store/store';
 import { BarCompare } from '../components/charts';
 import { SourcesDialog } from '../components/SourcesDialog';
-import { Money, ResultParts } from '../components/common';
+import { Money, ResultParts , SearchCombo } from '../components/common';
 
 export function StatementView() {
   const e = useEngine();
@@ -68,10 +68,9 @@ export function StatementView() {
         <label className="row small ink2">
           <input type="checkbox" checked={compare} disabled={!prev} onChange={(ev) => setCompare(ev.target.checked)} /> Sammenlign pr. måned med
         </label>
-        <select className="sm" value={period.compareToId ?? ''} onChange={(ev) => update((d) => ({ ...d, periods: d.periods.map((p) => (p.id === period.id ? { ...p, compareToId: ev.target.value || undefined } : p)) }))}>
-          <option value="">Automatisk{prevP && !period.compareToId ? ` (${prevP.name})` : ''}</option>
-          {data.periods.filter((p) => p.id !== period.id).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        <SearchCombo className="sm combo-narrow" options={data.periods.filter((p) => p.id !== period.id).map((p) => ({ id: p.id, label: p.name || `${p.start} – ${p.end}` }))}
+          value={period.compareToId} allowClear={`Automatisk${prevP && !period.compareToId ? ` (${prevP.name})` : ''}`} searchPlaceholder="Søg periode…" ariaLabel="Sammenlign med periode"
+          onChange={(id) => update((d) => ({ ...d, periods: d.periods.map((p) => (p.id === period.id ? { ...p, compareToId: id } : p)) }))} />
         <button className="btn sm" onClick={exportStatement}>Eksportér regnskab (CSV)</button>
         <button className="btn sm" onClick={exportTx}>Eksportér transaktioner (CSV)</button>
       </div>

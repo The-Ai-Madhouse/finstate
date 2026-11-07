@@ -10,7 +10,7 @@ import { uid } from '../../domain/util';
 import { deleteRule, setBankMap, upsertRule, useEngine } from '../../store/actions';
 import { storageUsage, useStore } from '../../store/store';
 import { exportBackup } from '../backup';
-import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, KIND_NAME, TypeSelect } from '../components/common';
+import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, KIND_NAME, SearchCombo, TypeSelect } from '../components/common';
 import { KIND_LABEL, NO_TYPE, addAccountType } from '../../domain/accountTypes';
 
 type Tab = 'accounts' | 'categories' | 'rules' | 'bank' | 'periods' | 'data';
@@ -382,10 +382,8 @@ function Periods() {
               <td><input type="date" value={p.start} onChange={(ev) => set(p.id, { start: ev.target.value })} /></td>
               <td><input type="date" value={p.end} onChange={(ev) => set(p.id, { end: ev.target.value })} /></td>
               <td>
-                <select value={p.compareToId ?? ''} onChange={(ev) => set(p.id, { compareToId: ev.target.value || undefined })}>
-                  <option value="">Automatisk</option>
-                  {data.periods.filter((x) => x.id !== p.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
+                <SearchCombo options={data.periods.filter((x) => x.id !== p.id).map((x) => ({ id: x.id, label: x.name || `${x.start} – ${x.end}` }))} value={p.compareToId}
+                  allowClear="Automatisk" searchPlaceholder="Søg periode…" ariaLabel="Sammenlign med periode" onChange={(compareToId) => set(p.id, { compareToId })} />
               </td>
               <td><button className="btn sm ghost danger" onClick={() => confirm(`Er du helt sikker på, at du vil slette ${p.name}?\n\nDet fjerner perioden, dens slideshow-tekster og bekræftelsen af balancen. Det kan ikke fortrydes uden backup.\n\nDine transaktioner, kategorier, regler og værdier bevares.`) && deleteStatement(p.id)}>Slet</button></td>
             </tr>
