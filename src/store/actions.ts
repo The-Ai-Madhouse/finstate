@@ -110,6 +110,7 @@ export function deleteAccount(accountId: string) {
       accounts: d.accounts.filter((a) => a.id !== accountId),
       valuations: d.valuations.filter((v) => v.accountId !== accountId),
       openItems: d.openItems.filter((o) => o.accountId !== accountId),
+      matches: (d.matches ?? []).filter((m) => m.accountId !== accountId),
       txs: d.txs.map((t) => (usesTarget(t.manual) || t.splits?.some(usesTarget) ? { ...t, manual: undefined, splits: undefined } : t)),
       rules: d.rules.filter((r) => !usesTarget(r.then) && !r.splits?.some((s) => usesTarget(s.cls))),
     };

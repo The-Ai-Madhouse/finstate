@@ -7,6 +7,7 @@ import { dayDiff } from '../../domain/util';
 import { setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { Empty, Money } from '../components/common';
+import { SettleOverview } from '../components/SettlePanel';
 
 export function TransfersView() {
   const period = usePeriod();
@@ -15,6 +16,7 @@ export function TransfersView() {
     <div className="stack">
       <h1>Overførsler</h1>
       <Internal />
+      <SettleOverview />
     </div>
   );
 }

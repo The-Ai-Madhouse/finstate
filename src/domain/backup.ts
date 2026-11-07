@@ -29,7 +29,7 @@ export function parseBackup(text: string): BackupFile {
   const b = obj as BackupFile;
   if (!b || b.app !== APP_ID || !b.data) throw new Error('Filen er ikke en Finstate-backup.');
   if (b.version !== 1) throw new Error(`Ukendt backup-version: ${String(b.version)}`);
-  for (const k of ['txs', 'rules', 'categories', 'accounts', 'valuations', 'openItems', 'periods'] as const) {
+  for (const k of ['txs', 'rules', 'categories', 'accounts', 'valuations', 'openItems', 'matches', 'periods'] as const) {
     if (b.data[k] !== undefined && !Array.isArray(b.data[k])) throw new Error(`Feltet "${k}" har forkert format.`);
   }
   return b;
@@ -63,6 +63,7 @@ export function applyBackup(cur: AppData, b: BackupFile, mode: 'replace' | 'merg
     txs: mergeById(cur.txs, d.txs),
     valuations: mergeById(cur.valuations, d.valuations),
     openItems: mergeById(cur.openItems, d.openItems),
+    matches: mergeById(cur.matches ?? [], d.matches),
     periods: mergeById(cur.periods, d.periods),
     slideNotes: { ...cur.slideNotes, ...(d.slideNotes ?? {}) },
     importProfiles: { ...cur.importProfiles, ...(d.importProfiles ?? {}) },

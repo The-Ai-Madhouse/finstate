@@ -14,7 +14,7 @@ import { uid } from '../../domain/util';
  * Ellers hele kroner: "1.235 kr".
  */
 export function Money({ v, decimals, precise, signed, colored }: { v: number; decimals?: boolean; precise?: boolean; signed?: boolean; colored?: boolean }) {
-  const txt = precise ? `${kr2f(signed ? Math.abs(v) : v)} kr` : decimals ? kr2f(v) : kr(signed ? Math.abs(v) : v);
+  const txt = precise ? `${kr2f(signed ? Math.abs(v) : v)} kr` : decimals ? kr2f(signed ? Math.abs(v) : v) : kr(signed ? Math.abs(v) : v);
   // Fortegn og farve ud fra det viste (afrundede) beløb – ellers "−0 kr".
   const shown = decimals || precise ? v : Math.round(v / 100) * 100;
   const sign = signed ? (shown > 0 ? '+' : shown < 0 ? '−' : '') : '';

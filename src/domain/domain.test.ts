@@ -507,3 +507,42 @@ describe('beløbsfelt', () => {
     expect(parseAmount('−12.345,67'.replace('−', '-'))).toBe(-1234567);
   });
 });
+
+describe('afstemning af udlæg', () => {
+  it('pairs an outlay with repayments and writes off a difference', async () => {
+    const { settleState, pairItems, writeOffDifference } = await import('./settle');
+    const base = emptyData();
+    const d0 = {
+      ...base,
+      settings: { ...base.settings, bookStart: '2025-06-30', bookStartSet: true },
+      categories: [{ id: 'ex-gaver', name: 'Gaver givet', kind: 'expense' as const }],
+      accounts: [
+        { id: 'a', name: 'Lønkonto', kind: 'bank' as const, side: 'asset' as const, aliases: [] },
+        { id: 'v', name: 'Venner skylder mig', kind: 'tracked' as const, side: 'asset' as const, aliases: [] },
+      ],
+      periods: [{ id: 'p', name: 'H2', start: '2025-07-01', end: '2025-12-31' }],
+      txs: [
+        { id: 'ud', accountId: 'a', date: '2025-08-01', text: 'Restaurant', amount: -80000, seq: 0, importedAt: '', manual: { type: 'internal' as const, targetAccountId: 'v' } },
+        { id: 'j', accountId: 'a', date: '2025-08-03', text: 'MobilePay Jonas', amount: 40000, seq: 1, importedAt: '', manual: { type: 'internal' as const, targetAccountId: 'v' } },
+        { id: 'i', accountId: 'a', date: '2025-08-04', text: 'MobilePay Ida', amount: 35000, seq: 2, importedAt: '', manual: { type: 'internal' as const, targetAccountId: 'v' } },
+        { id: 'x', accountId: 'a', date: '2025-09-01', text: 'Biograf', amount: -12000, seq: 3, importedAt: '', manual: { type: 'internal' as const, targetAccountId: 'v' } },
+        { id: 'y', accountId: 'a', date: '2025-09-02', text: 'MobilePay Jonas', amount: 12000, seq: 4, importedAt: '', manual: { type: 'internal' as const, targetAccountId: 'v' } },
+      ],
+    };
+    let st = settleState(d0, buildEngine(d0).ledger, 'v');
+    expect(st.open.map((i) => i.amount)).toEqual([80000, -40000, -35000, 12000, -12000]);
+    expect(st.suggestions.map(([a, b]) => [a.key, b.key])).toEqual([['tx:x', 'tx:y']]);
+    const d1 = pairItems(pairItems(d0, 'v', ['tx:ud', 'tx:j', 'tx:i']), 'v', ['tx:x', 'tx:y']);
+    st = settleState(d1, buildEngine(d1).ledger, 'v');
+    expect(st.open).toEqual([]);
+    expect(st.groups.map((g) => g.sum)).toEqual([5000, 0]); // Ida betalte 50 kr for lidt
+    const g = st.groups[0].match.id;
+    const d2 = writeOffDifference(d1, buildEngine(d1).ledger, g, 'ex-gaver');
+    const e2 = buildEngine(d2);
+    expect(settleState(d2, e2.ledger, 'v').groups.map((x) => x.sum)).toEqual([0, 0]);
+    const s = e2.statement(d2.periods[0]);
+    expect(s.rows.find((r) => r.ref === 'acc:v')!.close).toBe(0);
+    expect(s.expense.find((c) => c.id === 'ex-gaver')!.amount).toBe(5000);
+    expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
+  });
+});

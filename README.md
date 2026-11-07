@@ -23,7 +23,7 @@ Start altid med en periode (H1, H2, helår eller egne datoer) øverst i menuen. 
 
 1. **Importér** CSV fra hver konto (overlap er ufarligt – dubletter genkendes på hash).
 2. **Kategorisér** – kronologisk gennemgang eller grupperet; "Lignende" giver samme kategori til flere på én gang, "Opdel" deler et beløb.
-3. **Overførsler** – interne overførsler parres på tværs af konti.
+3. **Overførsler** – interne overførsler parres på tværs af konti; udlæg og tilbagebetalinger afstemmes pr. post (går det op?).
 4. **Aktiver & passiver** – alle poster i ét samlet billede. Hver post har en valgfri egen type og enten
    *følger overførsler* eller *tastes selv*. Poster og kommentarer kopieres fra forrige periode.
 5. **Regnskab** – resultat & balance med sammenligning; klik på et beløb for at se, hvad det består af; CSV-eksport.

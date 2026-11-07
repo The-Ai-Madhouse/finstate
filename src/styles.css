@@ -525,3 +525,10 @@ table.bs tr.drop-over td { box-shadow: inset 0 2px 0 var(--accent); }
 /* Opdelt transaktion i redigering */
 .split-summary { border: 1px solid var(--line-strong); border-left: 3px solid var(--type-internal); border-radius: 6px; padding: 6px 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; }
 .chip.split-chip { border-color: var(--type-internal); color: var(--type-internal); }
+
+/* Afstemning af udlæg/tilgodehavender */
+.settle { border-top: 1px solid var(--line); padding-top: 8px; }
+.settle table td { padding-top: 3px; padding-bottom: 3px; }
+.settle-suggest { background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px; }
+.settle-group { border: 1px solid var(--line); border-left: 3px solid var(--warning); border-radius: 8px; padding: 6px 10px; margin-top: 6px; }
+.settle-group.ok { border-left-color: var(--good); }

@@ -138,6 +138,18 @@ export interface OpenItem {
   note?: string;
 }
 
+/**
+ * En afstemningsgruppe på en post, der følger overførsler (fx "Jonas skylder mig"): bevægelser,
+ * der hører sammen – typisk et udlæg og tilbagebetalingen. Summen 0 = udlignet.
+ * Nøgler: "tx:<transaktions-id>" eller "oi:<åben post-id>" (startsaldo/afskrivning).
+ */
+export interface Match {
+  id: string;
+  accountId: string;
+  keys: string[];
+  note?: string;
+}
+
 export interface Period {
   id: string;
   name: string;
@@ -204,6 +216,8 @@ export interface AppData {
   txs: Tx[];
   valuations: Valuation[];
   openItems: OpenItem[];
+  /** Afstemning af udlæg/tilgodehavender: hvad hører sammen. */
+  matches: Match[];
   periods: Period[];
   /** periodId -> slideKey -> brugerens tekst (overstyrer forslag). */
   slideNotes: Record<string, Record<string, string>>;

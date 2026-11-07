@@ -93,6 +93,7 @@ export function emptyData(): AppData {
     txs: [],
     valuations: [],
     openItems: [],
+    matches: [],
     periods: [],
     slideNotes: {},
     importProfiles: {},
