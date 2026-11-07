@@ -302,10 +302,13 @@ export function ClassEditor({ value, onChange, accountId, amount, compact, txId,
   const { categories } = useData();
   const signKind = amount > 0 ? 'income' : amount < 0 ? 'expense' : undefined;
   const isPl = value.type === 'income' || value.type === 'expense';
+  const wrapRef = useRef<HTMLDivElement>(null);
+  // Efter klik på en typeknap: markøren direkte i søgefeltet (kategori eller post), så man kan skrive med det samme.
+  const focusSearch = () => setTimeout(() => wrapRef.current?.querySelector<HTMLInputElement>('.combo-input')?.focus(), 0);
   return (
-    <div className="col class-editor-wrap" style={{ gap: 4 }}>
+    <div className="col class-editor-wrap" style={{ gap: 4 }} ref={wrapRef}>
       <div className="row class-editor">
-        <TypeSeg value={value.type} amount={amount} onChange={(k) => onChange(withTypeKey(value, k, amount, categories))} />
+        <TypeSeg value={value.type} amount={amount} onChange={(k) => { onChange(withTypeKey(value, k, amount, categories)); focusSearch(); }} />
         {isPl && (
           <CategoryCombo className={`grow ${sm}`} primaryKind={signKind} value={value.categoryId}
             onChange={(categoryId) => onChange({ type: plTypeOf(categories.find((c) => c.id === categoryId), amount), categoryId })}
