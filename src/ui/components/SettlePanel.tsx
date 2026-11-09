@@ -4,7 +4,7 @@ import { isSettled, pairItems, settleState, unpair, writeOffDifference, type Set
 import type { Account } from '../../domain/types';
 import { useEngine } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { CategoryCombo, Money, SearchCombo } from './common';
+import { CategoryCombo, Money, SearchCombo, InfoBox } from './common';
 
 /**
  * Afstemning af en post, der følger overførsler (udlæg, tilgodehavender, gæld til personer):
@@ -41,7 +41,7 @@ export function SettlePanel({ acc }: { acc: Account }) {
     <div className="settle">
       <div className="row small" style={{ marginBottom: 6 }}>
         <b>Afstemning</b>
-        <span className="ink2">+ øger saldoen (fx et udlæg), − mindsker den (fx en tilbagebetaling). En gruppe går op, når summen er 0.</span>
+        <InfoBox label="Fortegn">+ øger saldoen (fx et udlæg), − mindsker den (fx en tilbagebetaling). En gruppe går op, når summen er 0.</InfoBox>
         <span className="spacer" />
         <span className={`chip ${st.open.length ? 'review' : 'user'}`}>{st.open.length} uparrede</span>
         <span className="chip">{done.length} udlignet</span>
@@ -79,7 +79,7 @@ export function SettlePanel({ acc }: { acc: Account }) {
                 <button className="btn sm primary" onClick={() => pair([...sel])}>Par valgte</button>
                 {notDone.length > 0 && <span className="muted">eller føj til en gruppe herunder</span>}
               </>
-            ) : <span className="muted">Sæt flueben ved det, der hører sammen (fx et udlæg og de tilbagebetalinger, der dækker det).</span>}
+            ) : <span className="muted">Sæt flueben ved det, der hører sammen.</span>}
           </div>
         </>
       )}
@@ -149,9 +149,9 @@ export function SettleOverview() {
           </span>
         ) : <button className="btn sm" onClick={() => { setAdding(true); setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Tilføj post til afstemning"]')?.focus(), 0); }}>+ Tilføj post</button>)}
       </div>
-      <p className="ink2 small" style={{ marginBottom: 10 }}>
+      <InfoBox>
         Vælg de poster, hvor det giver mening at parre det, der hører sammen – fx et udlæg og tilbagebetalingen – så du kan se, hvad der er afregnet, og om beløbene stemmer.
-      </p>
+      </InfoBox>
       {!posts.length ? (
         <div className="small muted">Ingen poster valgt endnu. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig".</div>
       ) : (

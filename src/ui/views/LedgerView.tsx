@@ -12,7 +12,7 @@ import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
 import { saveRule, setManual, useEngine, usePeriod } from '../../store/actions';
-import { AccountSelect, CategoryCombo, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel } from '../components/common';
+import { AccountSelect, CategoryCombo, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
 
 const clsOf = (r: Resolved): Classification => {
   const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
@@ -194,10 +194,13 @@ function ReviewGroups({ txs }: { txs: Tx[] }) {
   return (
     <div className="card">
       <div className="card-head">
-        <p className="ink2 grow">
-          {txs.length} transaktioner i {groups.length} grupper. Forslagene kommer fra bankens kategorier (kan slås fra under Indstillinger → Regler).
-          Vælg type og kategori for en hel gruppe ad gangen{rulesOn ? <> – med <b>Husk</b> klares samme tekst automatisk fremover</> : ''}.
-        </p>
+        <div className="grow">
+          <p className="ink2">{txs.length} transaktioner i {groups.length} grupper.</p>
+          <InfoBox>
+            Forslagene kommer fra bankens kategorier (kan slås fra under Indstillinger → Regler).
+            Vælg type og kategori for en hel gruppe ad gangen{rulesOn ? <> – med <b>Husk</b> klares samme tekst automatisk fremover</> : ''}.
+          </InfoBox>
+        </div>
         {acceptable.length > 0 && (
           <button className="btn" title="Godkender bankens forslag som dine valg (uden at lave regler)" onClick={() => {
             for (const [, g] of acceptable) setManual(g.map((t) => t.id), clsOf(e.resolved.get(g[0].id)!));
@@ -280,9 +283,9 @@ function TxTable({ txs }: { txs: Tx[] }) {
 
   return (
     <div className="card">
-      <p className="small muted" style={{ marginBottom: 8 }}>
+      <InfoBox label="Tastatur">
         Tastatur: klik på en række og brug ↑/↓ (eller j/k), <b>1–2</b> for type (indtægt/udgift · intern), <b>Enter</b> godkender forslaget.
-      </p>
+      </InfoBox>
       <div className="table-wrap">
         <table>
           <thead>

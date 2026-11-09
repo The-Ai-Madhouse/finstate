@@ -15,7 +15,7 @@ import { NoPeriod } from '../components/PeriodPrompt';
 import { importCoverage } from '../../domain/engine';
 import { importFiles, removeImport } from '../../domain/imports';
 import { dateDa } from '../../domain/format';
-import { AccountSelect, Empty, Money, SearchCombo } from '../components/common';
+import { AccountSelect, Empty, Money, SearchCombo, InfoBox } from '../components/common';
 
 interface Pending {
   key: string;
@@ -48,9 +48,9 @@ function CoverageCard() {
   return (
     <div className="card">
       <h2>Data til {period.name}</h2>
-      <p className="ink2 small" style={{ marginBottom: 10 }}>
+      <InfoBox>
         Til dette financial statement skal hver bankkonto have data fra {dateDa(period.start)} til {dateDa(period.end)} (gerne lidt før og efter).
-      </p>
+      </InfoBox>
       {!cov.length ? (
         <Empty>Ingen bankkonti endnu – træk din første CSV-fil herind nedenfor, så oprettes kontoen.</Empty>
       ) : (
@@ -116,10 +116,10 @@ function ImportInner() {
     <div className="stack">
       <h1>Importér bankdata</h1>
       <CoverageCard />
-      <p className="ink2" style={{ maxWidth: 820 }}>
+      <InfoBox label="Sådan henter du filen">
         Eksportér transaktioner som CSV fra netbanken for hver konto (typisk under kontoen → Eksportér). Filen læses kun her i browseren.
         Det er sikkert at importere overlappende perioder – transaktioner, der allerede findes, springes over.
-      </p>
+      </InfoBox>
       <label
         className={`drop ${over ? 'over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
@@ -278,10 +278,10 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
         </div>
       ) : (
         <>
-          <p className="small ink2" style={{ marginBottom: 8 }}>
+          <InfoBox label="Hvad er kolonnevalget?">
             Her fortæller du kun Finstate, <b>hvilken kolonne i filen der indeholder hvad</b> – det har intet med din kategorisering at gøre.
             Det huskes til næste gang, du importerer en fil i samme format.
-          </p>
+          </InfoBox>
           <div className="row" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
             <label className="field">Tekst {colSelect('text', p.mapping.text?.[0], false)}<span className="muted">Posteringsteksten</span></label>
             {FIELDS.map((f) => (
@@ -431,7 +431,7 @@ function ImportedFiles() {
   return (
     <div className="card">
       <h2>Importerede filer</h2>
-      <p className="ink2 small" style={{ marginBottom: 10 }}>Klik på en fil for at se indholdet. Fjerner du en fil, slettes dens transaktioner – undtagen dem, som en anden af dine filer også indeholder.</p>
+      <InfoBox>Klik på en fil for at se indholdet. Fjerner du en fil, slettes dens transaktioner – undtagen dem, som en anden af dine filer også indeholder.</InfoBox>
       <table>
         <thead><tr><th>Fil</th><th>Konto</th><th>Importeret</th><th>Dækker</th><th className="num">Transaktioner</th><th /></tr></thead>
         <tbody>

@@ -7,7 +7,7 @@ import type { Account, Period, Valuation } from '../../domain/types';
 import { addDays, uid } from '../../domain/util';
 import { deleteAccount, deleteImpact, moveAccount, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, SearchCombo, TypeSelect } from '../components/common';
+import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, SearchCombo, TypeSelect, InfoBox } from '../components/common';
 import { valuationResultInPeriod } from '../../domain/ledger';
 import { BalanceSourcesDialog } from '../components/SourcesDialog';
 import { SettleToggle } from '../components/SettlePanel';
@@ -25,7 +25,8 @@ export function BalanceView() {
 
 const SIDE_LABEL = { asset: 'Aktiver', liability: 'Passiver' } as const;
 
-type ShowSources = (s: { ref: string; label: string; side: 'asset' | 'liability' }) => void;
+type SrcReq = { ref: string; label: string; side: 'asset' | 'liability'; view: 'primo' | 'period' };
+type ShowSources = (s: SrcReq) => void;
 
 /** Klikbart beløb i balancen → "Hvad består posten af?" */
 function SrcAmount({ v, signed, colored, onOpen }: { v: number; signed?: boolean; colored?: boolean; onOpen: () => void }) {
@@ -47,7 +48,7 @@ function BalanceSheet({ period }: { period: Period }) {
   const [open, setOpen] = useState<string>();
   // Netop oprettet post: markøren skal stå i det felt, der skal udfyldes.
   const [justAdded, setJustAdded] = useState<string>();
-  const [sources, setSources] = useState<{ ref: string; label: string; side: 'asset' | 'liability' }>();
+  const [sources, setSources] = useState<SrcReq>();
   // Periodens poster (og poster uden for listen, der har en saldo) – placeret efter fortegn: positiv = aktiv, negativ = passiv.
   const accById = new Map(e.data.accounts.map((a) => [`acc:${a.id}`, a]));
   const sign = (sd: 'asset' | 'liability') => (sd === 'asset' ? 1 : -1);
@@ -58,10 +59,10 @@ function BalanceSheet({ period }: { period: Period }) {
         <h2 className="grow">Balance {period.name}</h2>
         <span className="small muted">Primo = {addDays(period.start, -1)} · Ultimo = {period.end}</span>
       </div>
-      <p className="ink2 small" style={{ marginBottom: 12 }}>
+      <InfoBox>
         Alt du ejer og skylder. Bankkonti følger dine importerede transaktioner; andre poster følger enten dine overførsler, eller du skriver værdien selv.
         En post med positiv saldo står under aktiver, en med negativ under passiver. Ændringer, der ikke skyldes dine egne overførsler, bliver til afkast, renter m.m. – klik på en række for detaljer.
-      </p>
+      </InfoBox>
       <table className="bs">
         {(['asset', 'liability'] as const).map((sd) => {
           const accRows = s.rows.filter((r) => r.side === sd && accById.has(r.ref));
@@ -82,9 +83,9 @@ function BalanceSheet({ period }: { period: Period }) {
                 <tr key={r.ref}>
                   <td>{r.label}</td>
                   <td><span className="chip">{r.kind === 'cp' ? (r.side === 'asset' ? 'Tilgodehavende · udlæg' : 'Gæld · udlæg') : 'Penge undervejs'}</span></td>
-                  <td className="num"><SrcAmount v={r.open * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd })} /></td>
-                  <td className="num"><SrcAmount v={r.close * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd })} /></td>
-                  <td className="num ink2"><SrcAmount v={(r.close - r.open) * sign(sd)} signed onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd })} /></td>
+                  <td className="num"><SrcAmount v={r.open * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'primo' })} /></td>
+                  <td className="num"><SrcAmount v={r.close * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
+                  <td className="num ink2"><SrcAmount v={(r.close - r.open) * sign(sd)} signed onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
                   <td className="num"><button className="btn sm ghost" onClick={() => setView('transfers')}>{r.kind === 'cp' ? 'Se udlæg →' : 'Se overførsler →'}</button></td>
                 </tr>
               ))}
@@ -110,7 +111,7 @@ function BalanceSheet({ period }: { period: Period }) {
           </tr>
         </tbody>
       </table>
-      {sources && <BalanceSourcesDialog refKey={sources.ref} label={sources.label} side={sources.side} period={period} onClose={() => setSources(undefined)} />}
+      {sources && <BalanceSourcesDialog refKey={sources.ref} label={sources.label} side={sources.side} view={sources.view} period={period} onClose={() => setSources(undefined)} />}
     </div>
   );
 }
@@ -143,7 +144,7 @@ function useValuationActions(acc: Account) {
 }
 
 function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded }: { acc: Account; row: BsRow; period: Period; expanded: boolean; justAdded?: boolean; onToggle: () => void; onSources: ShowSources }) {
-  const openSources = () => onSources({ ref: `acc:${acc.id}`, label: acc.name, side: row.side });
+  const openSources = (view: 'primo' | 'period' = 'period') => onSources({ ref: `acc:${acc.id}`, label: acc.name, side: row.side, view });
   const [draggable, setDraggable] = useState(false);
   const [over, setOver] = useState(false);
   const e = useEngine();
@@ -183,11 +184,11 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
           </>
         ) : (
           <>
-            <td className="num"><SrcAmount v={row.open * sign} onOpen={openSources} /></td>
-            <td className="num"><SrcAmount v={row.close * sign} onOpen={openSources} />{acc.kind === 'bank' && !hasTx && <div className="small neg">ingen import</div>}</td>
+            <td className="num"><SrcAmount v={row.open * sign} onOpen={() => openSources('primo')} /></td>
+            <td className="num"><SrcAmount v={row.close * sign} onOpen={() => openSources()} />{acc.kind === 'bank' && !hasTx && <div className="small neg">ingen import</div>}</td>
           </>
         )}
-        <td className="num ink2"><SrcAmount v={(row.close - row.open) * sign} signed onOpen={openSources} />{manual && <ResultParts parts={valuationResultInPeriod(e.data, e.ledger, period, acc.id)} categories={e.data.categories} />}</td>
+        <td className="num ink2"><SrcAmount v={(row.close - row.open) * sign} signed onOpen={() => openSources()} />{manual && <ResultParts parts={valuationResultInPeriod(e.data, e.ledger, period, acc.id)} categories={e.data.categories} />}</td>
         <td className="num"><button className="btn sm ghost" onClick={onToggle}>{expanded ? 'Luk' : 'Detaljer'}</button></td>
       </tr>
       {expanded && (
@@ -369,7 +370,10 @@ function AddRow({ side, period, onAdded }: { side: 'asset' | 'liability'; period
           <KindSelect value={kind} onChange={setKind} />
           <button className="btn sm primary" disabled={!name.trim()} onClick={add}>Tilføj</button>
           <button className="btn sm ghost" onClick={() => setActive(false)}>Annullér</button>
-          <span className="small muted">{KIND_HINT[kind]}{!data.accountTypes.length && ` Typen er valgfri (${NO_TYPE.toLowerCase()} er fint) – opret dine egne med "+ Ny type…".`}</span>
+          <InfoBox label="Type og saldo">
+            <b>{KIND_LABEL.tracked}:</b> {KIND_HINT.tracked}<br /><b>{KIND_LABEL.valuation}:</b> {KIND_HINT.valuation}<br />
+            Typen er valgfri ({NO_TYPE.toLowerCase()} er fint) – opret dine egne med "+ Ny type…".
+          </InfoBox>
         </div>
       </td>
     </tr>
@@ -388,11 +392,11 @@ function Opening() {
   return (
     <div className="card">
       <h2>Åbningsbalance & bogføringsstart</h2>
-      <p className="ink2 small" style={{ marginBottom: 12 }}>
+      <InfoBox>
         Bogføringen starter dagen efter <b>bogføringsstart</b>. Bankkontiens åbningssaldo udledes automatisk af saldokolonnen.
         Startsaldoen for poster som "Jonas skylder mig" skriver du under postens Detaljer i balancen ovenfor; penge der var undervejs mellem konti skriver du her.
-        {firstPeriod && addDays(bookStart, 1) !== firstPeriod.start && <span className="neg"> Tip: første periode starter {firstPeriod.start} – bogføringsstart bør typisk være {addDays(firstPeriod.start, -1)}.</span>}
-      </p>
+      </InfoBox>
+      {firstPeriod && addDays(bookStart, 1) !== firstPeriod.start && <p className="small neg" style={{ marginBottom: 8 }}>Tip: første periode starter {firstPeriod.start} – bogføringsstart bør typisk være {addDays(firstPeriod.start, -1)}.</p>}
       <div className="row" style={{ marginBottom: 12 }}>
         <label className="field">Bogføringsstart {data.settings.bookStartSet ? '(valgt af dig)' : '(automatisk ud fra dine data)'}
           <input type="date" value={bookStart} onChange={(ev) => ev.target.value && update((d) => ({ ...d, settings: { ...d.settings, bookStart: ev.target.value, bookStartSet: true } }))} />

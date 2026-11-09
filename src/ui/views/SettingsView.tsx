@@ -10,7 +10,7 @@ import { uid } from '../../domain/util';
 import { deleteRule, setBankMap, upsertRule, useEngine } from '../../store/actions';
 import { storageUsage, useStore } from '../../store/store';
 import { exportBackup } from '../backup';
-import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, KIND_NAME, SearchCombo, TypeSelect } from '../components/common';
+import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, KIND_NAME, SearchCombo, TypeSelect, InfoBox } from '../components/common';
 import { KIND_LABEL, NO_TYPE, addAccountType } from '../../domain/accountTypes';
 
 type Tab = 'accounts' | 'categories' | 'rules' | 'bank' | 'periods' | 'data';
@@ -51,10 +51,10 @@ function Accounts() {
     <div className="card">
       <h2>Poster – aktiver og passiver</h2>
       <div className="card-head">
-        <p className="ink2 small grow">
+        <InfoBox>
           Alle dine poster. Det er nemmest at tilføje og udfylde dem direkte i balancen – her kan du rette navne, typer og hvordan de genkendes i overførselstekster
           (fx "Min opsparing" i "Overførsel til Min opsparing").
-        </p>
+        </InfoBox>
         <button className="btn primary" onClick={() => setView('balance')}>Åbn Aktiver & passiver →</button>
       </div>
       {!data.accounts.length ? <Empty>Ingen konti endnu. Bankkonti oprettes, når du importerer; andre poster tilføjer du i Aktiver & passiver.</Empty> : (
@@ -105,10 +105,10 @@ function AccountTypes() {
   return (
     <div className="card">
       <h2>Posttyper</h2>
-      <p className="ink2 small" style={{ marginBottom: 10 }}>
+      <InfoBox>
         Dine egne labels til poster i balancen, fx "Opsparing", "Investeringer", "Lån" eller "Personer". Typen er kun et label – om saldoen følger dine overførsler
         eller tastes selv, vælger du pr. post. "{NO_TYPE}" er altid en mulighed.
-      </p>
+      </InfoBox>
       {data.accountTypes.map((t) => (
         <div key={t.id} className="row" style={{ marginBottom: 4 }}>
           <input className="sm" value={t.name} aria-label="Typens navn"
@@ -173,7 +173,7 @@ function Categories() {
       {(['income', 'both', 'expense'] as const).map((kind) => (
         <div key={kind} className="card">
           <div className="card-head"><h2 className="grow">{kind === 'income' ? 'Indtægter' : kind === 'expense' ? 'Udgifter' : KIND_NAME.both}</h2><button className="btn sm" onClick={() => add(kind)}>+ Kategori</button></div>
-          {kind === 'both' && <p className="small muted" style={{ marginBottom: 6 }}>Fx renter eller afkast: et positivt beløb er en indtægt, et negativt en udgift.</p>}
+          {kind === 'both' && <InfoBox label="Hvad er begge veje?">Fx renter eller afkast: et positivt beløb er en indtægt, et negativt en udgift.</InfoBox>}
           {data.categories.filter((c) => c.kind === kind && !c.parentId).map((top) => (
             <div key={top.id} style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
               <div className="row">
@@ -233,7 +233,7 @@ function Rules() {
     <div className="card">
       <h2>Dine regler</h2>
       <div className="card-head">
-        <p className="ink2 small grow">Regler matcher den <i>normaliserede</i> tekst (små bogstaver, uden datoer, numre og "Dankort-nota"). "Præcis" er sikrest; "indeholder" fanger varianter. Dine manuelle valg på enkelte transaktioner har altid forrang.</p>
+        <InfoBox>Regler matcher den <i>normaliserede</i> tekst (små bogstaver, uden datoer, numre og "Dankort-nota"). "Præcis" er sikrest; "indeholder" fanger varianter. Dine manuelle valg på enkelte transaktioner har altid forrang.</InfoBox>
         <input placeholder="Søg i regler" value={q} onChange={(ev) => setQ(ev.target.value)} />
         <button className="btn" onClick={() => { const id = uid('rule'); setNewRule(id); setQ(''); upsertRule({ id, pattern: '', match: 'contains', then: { type: 'expense' }, createdAt: new Date().toISOString() }); }}>+ Regel</button>
       </div>
@@ -272,10 +272,10 @@ function BuiltInSuggestions() {
   return (
     <div className="card">
       <h2>Automatiske forslag (indbygget)</h2>
-      <p className="ink2 small" style={{ marginBottom: 10 }}>
+      <InfoBox>
         Finstate kan selv foreslå noget. Her er <b>alt</b>, den gør automatisk – slå det fra, du ikke vil have.
         Dine egne valg og regler vinder altid.
-      </p>
+      </InfoBox>
       {items.map((it) => {
         const on = st[it.key] !== false;
         const n = it.src.reduce((s, x) => s + count(x), 0);
@@ -332,10 +332,10 @@ function BankMapping() {
         <b>Brug bankens kategorier som forslag</b>
         <span className="small muted">– slå fra for at kategorisere helt fra bunden (dine regler og valg påvirkes ikke)</span>
       </label>
-      <p className="ink2 small" style={{ marginBottom: 12 }}>
+      <InfoBox>
         Bankens egne kategorier bruges som første gæt. Map dem til dit træ én gang – resultatet vises stadig som et <i>forslag</i>, du godkender i Kategorisér.
         Kategorier der dækker over mange slags poster (fx "Overførsler") er bedst at lade stå tomme.
-      </p>
+      </InfoBox>
       {!pairs.length ? <Empty>Ingen bankkategorier fundet i de importerede data.</Empty> : (
         <table>
           <thead><tr><th>Bankens kategori</th><th className="num">Antal</th><th>Eksempel</th><th style={{ minWidth: 400 }}>Mit gæt</th><th /></tr></thead>
@@ -372,7 +372,7 @@ function Periods() {
   return (
     <div className="card">
       <h2>Perioder</h2>
-      <p className="ink2 small" style={{ marginBottom: 12 }}>Perioder er blot datointervaller over samme bogføring – du kan have både halvår og helår, og sammenligne vilkårligt.</p>
+      <InfoBox>Perioder er blot datointervaller over samme bogføring – du kan have både halvår og helår, og sammenligne vilkårligt.</InfoBox>
       <table>
         <thead><tr><th>Navn</th><th>Start</th><th>Slut</th><th>Sammenlign med</th><th /></tr></thead>
         <tbody>

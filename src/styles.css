@@ -545,3 +545,13 @@ table.bs tr.drop-over td { box-shadow: inset 0 2px 0 var(--accent); }
 .class-editor { flex-wrap: wrap; min-width: 0; }
 .newpost { flex-basis: 100%; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 6px 8px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface-2); }
 .newpost input[aria-label="Navn på post"] { min-width: 160px; }
+
+/* Infoboks: forklaringer og eksempler, sammenklappet som standard */
+.infobox { margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+.infobox > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; color: var(--muted); font-size: 12px; user-select: none; }
+.infobox > summary::-webkit-details-marker { display: none; }
+.infobox > summary:hover { color: var(--ink); }
+.infobox-i { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid currentColor; font-size: 10px; font-weight: 700; font-style: italic; font-family: Georgia, serif; }
+.infobox[open] > summary { color: var(--ink); margin-bottom: 6px; }
+.infobox-body { background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 6px; padding: 8px 12px; line-height: 1.5; }
+.review-bar .infobox, .card-head .infobox, .row .infobox { margin: 0; }

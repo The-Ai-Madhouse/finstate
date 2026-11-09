@@ -133,17 +133,28 @@ export function SourcesDialog({ title, refs, kind, period, onClose }: {
 /**
  * "Hvad består posten af?" – primo, alle bevægelser i perioden og ultimo for en balancepost.
  */
-export function BalanceSourcesDialog({ refKey, label, side, period, onClose }: {
+export function BalanceSourcesDialog({ refKey, label, side, period, view = 'period', onClose }: {
   refKey: string;
   label: string;
   side: 'asset' | 'liability';
   period: Period;
+  /** primo: hvordan saldoen ved periodens start er bygget op (fra bogføringsstart). period: primo + bevægelser = ultimo. */
+  view?: 'primo' | 'period';
   onClose: () => void;
 }) {
   const e = useEngine();
   const { data } = e;
   const { showTx } = useStore.getState();
-  const src = balanceSources(e.ledger, refKey, period);
+  const { bookStart } = data.settings;
+  const primoDate = addDays(period.start, -1);
+  // Primo: alle posteringer til og med dagen før perioden – åbningen ved bogføringsstart + bevægelserne siden.
+  const src = view === 'primo'
+    ? (() => {
+        const moves = e.ledger.postings.filter((p) => p.ref === refKey && p.date <= primoDate);
+        const total = moves.reduce((s, p) => s + p.amount, 0);
+        return { primo: 0, moves, ultimo: total };
+      })()
+    : balanceSources(e.ledger, refKey, period);
   const sign = side === 'asset' ? 1 : -1;
   const ownAccountId = refKey.startsWith('acc:') ? refKey.slice(4) : undefined;
   const acc = (id?: string) => data.accounts.find((a) => a.id === id);
@@ -164,7 +175,12 @@ export function BalanceSourcesDialog({ refKey, label, side, period, onClose }: {
       const o = data.openItems.find((x) => x.id === p.openItemId);
       return { text: o?.categoryId ? `Afskrivning (${categoryLabel(data.categories, o.categoryId)})` : 'Startsaldo', where: o?.note ?? '' };
     }
-    if (p.valuationId) return { text: 'Værdiændring ud over dine overførsler (afkast/renter)', where: '' };
+    if (p.valuationId) {
+      const v = data.valuations.find((x) => x.id === p.valuationId);
+      if (p.date === bookStart) return { text: `Værdi pr. ${dateShort(v?.date ?? bookStart)} (dit tal)${v && v.date !== bookStart ? ' minus overførsler indtil da' : ''}`, where: 'åbning' };
+      return { text: 'Værdiændring ud over dine overførsler (afkast/renter)', where: '' };
+    }
+    if (p.date === bookStart) return { text: 'Åbningssaldo (fra bankens saldo)', where: 'åbning' };
     return { text: 'Åbningssaldo', where: '' };
   };
 
@@ -172,18 +188,24 @@ export function BalanceSourcesDialog({ refKey, label, side, period, onClose }: {
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal card" role="dialog" aria-label={label} onMouseDown={(ev) => ev.stopPropagation()}>
         <div className="card-head">
-          <h2 className="keep-case">Hvad består {label} af?</h2>
+          <h2 className="keep-case">{view === 'primo' ? `Hvor kommer primo for ${label} fra?` : `Hvad består ${label} af?`}</h2>
           <button className="btn sm ghost" onClick={onClose} aria-label="Luk">✕</button>
         </div>
-        <p className="small ink2" style={{ marginBottom: 12 }}>{period.name} · {dateShort(period.start)} – {dateShort(period.end)}</p>
+        <p className="small ink2" style={{ marginBottom: 12 }}>
+          {view === 'primo'
+            ? <>Saldoen pr. {dateShort(primoDate)}: åbningen ved bogføringsstart ({dateShort(bookStart)}) plus alt, der er sket siden, frem til {period.name} starter.</>
+            : <>{period.name} · {dateShort(period.start)} – {dateShort(period.end)}</>}
+        </p>
 
-        <div className="row" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-strong)' }}>
-          <b>Primo</b><span className="muted small">pr. {dateShort(addDays(period.start, -1))}</span><span className="spacer" /><b><Money precise v={sign * src.primo} /></b>
-        </div>
+        {view === 'period' && (
+          <div className="row" style={{ padding: '6px 0', borderBottom: '1px solid var(--line-strong)' }}>
+            <b>Primo</b><span className="muted small">pr. {dateShort(primoDate)}</span><span className="spacer" /><b><Money precise v={sign * src.primo} /></b>
+          </div>
+        )}
 
         <section className="modal-section" style={{ marginTop: 10 }}>
-          <div className="section-label">Bevægelser i perioden ({src.moves.length})</div>
-          {!src.moves.length ? <p className="muted small">Ingen bevægelser i perioden.</p> : (
+          <div className="section-label">{view === 'primo' ? `Posteringer til og med ${dateShort(primoDate)}` : 'Bevægelser i perioden'} ({src.moves.length})</div>
+          {!src.moves.length ? <p className="muted small">{view === 'primo' ? 'Ingen posteringer før perioden – primo er 0.' : 'Ingen bevægelser i perioden.'}</p> : (
             <div className="modal-scroll">
               <table>
                 <thead><tr><th>Dato</th><th>Tekst</th><th>Fra/til</th><th className="num">Beløb</th><th /></tr></thead>
@@ -207,7 +229,8 @@ export function BalanceSourcesDialog({ refKey, label, side, period, onClose }: {
         </section>
 
         <div className="row" style={{ marginTop: 12, borderTop: '1.5px solid var(--ink)', paddingTop: 10 }}>
-          <b>Ultimo</b><span className="muted small">pr. {dateShort(period.end)} = primo {sign * (src.ultimo - src.primo) >= 0 ? '+' : '−'} {kr(Math.abs(src.ultimo - src.primo))}</span>
+          <b>{view === 'primo' ? 'Primo' : 'Ultimo'}</b>
+          <span className="muted small">{view === 'primo' ? `pr. ${dateShort(primoDate)}` : `pr. ${dateShort(period.end)} = primo ${sign * (src.ultimo - src.primo) >= 0 ? '+' : '−'} ${kr(Math.abs(src.ultimo - src.primo))}`}</span>
           <span className="spacer" />
           <b><Money precise v={sign * src.ultimo} /></b>
         </div>

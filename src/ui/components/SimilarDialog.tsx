@@ -6,7 +6,7 @@ import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
 import { applySplitTo, saveRule, saveSplitRule, setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { AmountInput, ClassEditor, Money, SourceChip, TxNotes, categoryLabel, isComplete } from './common';
+import { AmountInput, ClassEditor, Money, SourceChip, TxNotes, categoryLabel, isComplete, InfoBox } from './common';
 
 const clsOf = (r: Resolved): Classification => {
   const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
@@ -103,9 +103,9 @@ export function SimilarDialog({ tx, similar, initial, onClose, onApplied }: {
           </div>
         ) : (
           <div style={{ marginBottom: 14 }}>
-            <p className="small ink2" style={{ marginBottom: 6 }}>
+            <InfoBox label="Sådan virker opdelingen">
               Faste beløb trækkes ud af <b>hver</b> valgt transaktion; <b>resten</b> af hvert beløb går til den første linje. Er en transaktion mindre end de faste beløb, går det hele til resten.
-            </p>
+            </InfoBox>
             <div className="split-list">
               <div className="split-line rest">
                 <div className="split-amt"><span className="small muted">Resten</span></div>

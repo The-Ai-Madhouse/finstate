@@ -7,7 +7,7 @@ import type { Period } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { BarCompare, TrendLine } from '../components/charts';
-import { Money } from '../components/common';
+import { Money, InfoBox } from '../components/common';
 import { rowsFor } from './StatementView';
 
 interface SlideDef { key: string; title: string; render: (text: string) => ReactNode; defaultText: string; hint: string }
@@ -185,7 +185,7 @@ function Deck({ period }: { period: Period }) {
         <button className="btn" onClick={() => window.print()}>Gem som PDF</button>
         <button className="btn primary" onClick={() => setPresenting(0)}>▶ Præsentér</button>
       </div>
-      <p className="ink2 small no-print">Teksterne er forslag ud fra tallene. Ret dem direkte – dine rettelser gemmes for perioden, mens tal og diagrammer altid følger regnskabet.</p>
+      <div className="no-print"><InfoBox>Teksterne er forslag ud fra tallene. Ret dem direkte – dine rettelser gemmes for perioden, mens tal og diagrammer altid følger regnskabet.</InfoBox></div>
       <div className="deck">
         {slides.map((sl, i) => {
           const custom = notes[sl.key] !== undefined;

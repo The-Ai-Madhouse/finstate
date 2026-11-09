@@ -6,7 +6,7 @@ import type { Tx } from '../../domain/types';
 import { dayDiff } from '../../domain/util';
 import { setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { Empty, Money } from '../components/common';
+import { Empty, Money, InfoBox } from '../components/common';
 import { SettleOverview } from '../components/SettlePanel';
 
 export function TransfersView() {
@@ -59,10 +59,10 @@ function Internal() {
         <span className={`chip ${unpaired.length ? 'review' : 'user'}`}>{unpaired.length} uden modpost</span>
         <label className="row small ink2"><input type="checkbox" checked={showPaired} onChange={(ev) => setShowPaired(ev.target.checked)} /> Vis parrede</label>
       </div>
-      <p className="ink2 small" style={{ marginBottom: 10 }}>
+      <InfoBox>
         Interne overførsler flytter kun penge mellem aktiver. Hvis modposten først bogføres i næste periode, står beløbet automatisk som
         <b> Penge undervejs</b> på balancen{transit ? <> – lige nu <b>{kr(transit.close)}</b> ved periodens slutning (primo {kr(transit.open)})</> : ''}.
-      </p>
+      </InfoBox>
       {!shown.length ? <Empty>{rows.length ? 'Alle interne overførsler er parret.' : 'Ingen interne overførsler i perioden.'}</Empty> : (
         <table>
           <thead><tr><th>Dato</th><th>Konto</th><th>Tekst</th><th className="num">Beløb</th><th>Modpost</th><th /></tr></thead>

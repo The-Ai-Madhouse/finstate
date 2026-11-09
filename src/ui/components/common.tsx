@@ -564,6 +564,16 @@ export function AmountInput({ value, onCommit, className, placeholder, ariaLabel
   );
 }
 
+/** Forklaring/eksempler – sammenklappet som standard, så siden ikke fyldes med tekst. */
+export function InfoBox({ children, label = 'Sådan virker det' }: { children: ReactNode; label?: string }) {
+  return (
+    <details className="infobox">
+      <summary><span className="infobox-i" aria-hidden>i</span>{label}</summary>
+      <div className="infobox-body">{children}</div>
+    </details>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>{children}</div>;
 }

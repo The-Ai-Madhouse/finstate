@@ -7,7 +7,7 @@ import { setManual, useEngine, usePeriod } from '../../store/actions';
 import { inPeriod } from '../../domain/engine';
 import { SimilarDialog } from '../components/SimilarDialog';
 import { SplitDialog } from '../components/SplitDialog';
-import { ClassEditor, Empty, Money, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey } from '../components/common';
+import { ClassEditor, Empty, Money, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
 import { Confetti } from '../components/Confetti';
 import { useStore } from '../../store/store';
 
@@ -193,9 +193,9 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
             {handled > 0 && <span className="chip user">+{handled} i denne omgang</span>}
           </div>
           <div className="bigprogress" aria-hidden><div style={{ width: `${pct}%` }} /></div>
-          <div className="small muted">
+          <InfoBox label="Genveje">
             <b>Skriv</b> for at søge kategori/post · <b>↑/↓</b> vælg · <b>Enter</b> gem og videre · <b>1</b>/<b>2</b> (eller Alt+1/2) indtægt-udgift/intern · <b>N</b> næste ubehandlede
-          </div>
+          </InfoBox>
         </div>
         <label className="row small ink2"><input type="checkbox" checked={hideDone} onChange={(ev) => setHideDone(ev.target.checked)} /> Skjul afgjorte</label>
         {pending.length > 0 && (
