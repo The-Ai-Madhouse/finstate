@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ruleFromTx } from '../domain/classify';
+import { ruleFromTx, splitLines } from '../domain/classify';
 import { buildEngine, type Engine } from '../domain/engine';
 import type { AppData, BankMapEntry, Classification, Rule, Split, Tx } from '../domain/types';
 import { uid } from '../domain/util';
@@ -37,6 +37,27 @@ export function setManual(ids: string[], cls: Classification | undefined) {
 
 export function setSplits(id: string, splits: Split[] | undefined) {
   update(mapTx(new Set([id]), (t) => ({ ...t, splits })));
+}
+
+/**
+ * Samme opdeling på flere transaktioner: faste beløb (med transaktionens fortegn) og resten til den første linje.
+ * Er en transaktion mindre end de faste beløb, får den hele beløbet som "resten".
+ */
+export function applySplitTo(ids: string[], splits: NonNullable<Rule['splits']>) {
+  const set = new Set(ids);
+  update((d) => ({
+    ...d,
+    txs: d.txs.map((t) => {
+      if (!set.has(t.id)) return t;
+      const lines = splitLines(t, splits);
+      if (lines.length === 1) {
+        const { amount: _a, ...cls } = lines[0];
+        void _a;
+        return { ...t, manual: cls, splits: undefined };
+      }
+      return { ...t, splits: lines, manual: undefined };
+    }),
+  }));
 }
 
 /** Brugerens egen note – adskilt fra bankens kommentar (tx.note). */

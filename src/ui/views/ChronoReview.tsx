@@ -3,7 +3,8 @@ import { NEEDS_REVIEW, type Resolved } from '../../domain/classify';
 import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
-import { setManual, useEngine } from '../../store/actions';
+import { setManual, useEngine, usePeriod } from '../../store/actions';
+import { inPeriod } from '../../domain/engine';
 import { SimilarDialog } from '../components/SimilarDialog';
 import { SplitDialog } from '../components/SplitDialog';
 import { ClassEditor, Empty, Money, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey } from '../components/common';
@@ -258,6 +259,10 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
   };
 
   const acc = e.data.accounts.find((a) => a.id === tx.accountId);
+  const period = usePeriod();
+  // Knappen tæller kun lignende i det aktuelle financial statement (andre perioder kan vises i vinduet).
+  const nSimilar = period ? similar.filter((t) => inPeriod(t, period)).length : similar.length;
+  const similarLabel = `Lignende (${nSimilar}${nSimilar < similar.length ? `+${similar.length - nSimilar}` : ''})`;
   return (
     <div className={`chrono-row ${open ? 'open' : 'done'} ${flash ? 'flash' : ''} ${targeted ? 'targeted' : ''}`} tabIndex={0} data-txrow={tx.id} data-pending={isPending} onKeyDown={onKey}>
       <div className="small ink2">{dateShort(tx.date)}<div className="muted ellipsis">{acc?.name}</div></div>
@@ -288,7 +293,7 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
         {open ? (
           <>
             {similar.length > 0 && (
-              <button className="btn sm ghost" title="Se alle transaktioner med samme tekst – vælg hvilke og hvad de skal være" onClick={() => setShowSimilar(true)}>Lignende ({similar.length})</button>
+              <button className="btn sm ghost" title="Se alle transaktioner med samme tekst – vælg hvilke og hvad de skal være" onClick={() => setShowSimilar(true)}>{similarLabel}</button>
             )}
             {!isSplit && <button className="btn sm ghost" title="Del beløbet op, fx en løn = indtægt + indbetaling til pension" onClick={() => setShowSplit(true)}>Opdel</button>}
             {editing && <button className="btn sm ghost" onClick={() => { setEditing(false); setReplaceSplit(false); setCls(clsOf(r)); }}>Annullér</button>}
@@ -297,7 +302,7 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
         ) : (
           <>
             {r.source === 'manual' && <button className="btn sm ghost" title="Fjern dit valg (brug regel/forslag)" onClick={() => setManual([tx.id], undefined)}>↺</button>}
-            {similar.length > 0 && <button className="btn sm ghost" onClick={() => setShowSimilar(true)}>Lignende ({similar.length})</button>}
+            {similar.length > 0 && <button className="btn sm ghost" title="Samme tekst – i perioden (+ andre perioder)" onClick={() => setShowSimilar(true)}>{similarLabel}</button>}
             {isSplit && <button className="btn sm ghost" onClick={() => setShowSplit(true)}>Ret opdeling</button>}
             <button className="btn sm ghost" onClick={() => setEditing(true)}>Ret</button>
           </>
