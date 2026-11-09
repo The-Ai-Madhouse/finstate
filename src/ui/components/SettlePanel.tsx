@@ -163,8 +163,8 @@ export function SettleOverview() {
               const bad = st.groups.filter((g) => g.sum !== 0).length;
               const bal = st.items.reduce((s, i) => s + i.amount, 0);
               return [
-                <tr key={a.id} className={`click ${openId === a.id ? 'sel' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpenId(openId === a.id ? undefined : a.id); }}>
-                  <td>{a.name}</td>
+                <tr key={a.id} className={`click ${openId === a.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpenId(openId === a.id ? undefined : a.id); }}>
+                  <td><span className={`caret ${openId === a.id ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
                   <td className="num"><Money v={bal} decimals /></td>
                   <td>{st.open.length ? <span className="chip review">{st.open.length}</span> : <span className="chip user">0</span>}</td>
                   <td>{bad ? <span className="chip review">{bad}</span> : <span className="muted small">–</span>}</td>
@@ -173,7 +173,7 @@ export function SettleOverview() {
                     <button className="btn sm ghost" title="Fjern fra afstemningen (dine grupper bevares)" aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { setSettle(a.id, false); if (openId === a.id) setOpenId(undefined); }}>✕</button>
                   </td>
                 </tr>,
-                openId === a.id && <tr key={`${a.id}-p`} className="sel"><td colSpan={5}><SettlePanel acc={a} /></td></tr>,
+                openId === a.id && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={5}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
               ];
             })}
           </tbody>

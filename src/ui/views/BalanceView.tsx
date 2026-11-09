@@ -161,7 +161,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
   const hasTx = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
   return (
     <Fragment>
-      <tr className={`click ${expanded ? 'sel' : ''} ${over ? 'drop-over' : ''}`}
+      <tr className={`click ${expanded ? 'expanded' : ''} ${over ? 'drop-over' : ''}`}
         onClick={(ev) => { if (!(ev.target as HTMLElement).closest('input,button,select,.drag-handle')) onToggle(); }}
         draggable={draggable}
         onDragStart={(ev) => { dragging = { id: acc.id, side: row.side }; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', acc.id); }}
@@ -171,7 +171,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
         onDrop={(ev) => { ev.preventDefault(); setOver(false); if (dragging) moveAccount(dragging.id, { before: acc.id }); dragging = undefined; }}>
         <td>
           <span className="drag-handle" title="Træk for at flytte" aria-hidden onMouseDown={() => setDraggable(true)} onMouseUp={() => setDraggable(false)}>⋮⋮</span>
-          <span className="caret">{expanded ? '▾' : '▸'}</span> {acc.name} {noteFor(acc, period.id) ? <div style={{ paddingLeft: 16 }}><AccountNote account={acc} /></div> : <AccountNote account={acc} />}</td>
+          <span className={`caret ${expanded ? 'open' : ''}`} aria-hidden>›</span> {acc.name} {noteFor(acc, period.id) ? <div style={{ paddingLeft: 16 }}><AccountNote account={acc} /></div> : <AccountNote account={acc} />}</td>
         <td><span className={`chip ${acc.typeId ? '' : 'muted'}`} title={`${KIND_LABEL[acc.kind]}. ${KIND_HINT[acc.kind]}`}>{typeName(e.data.accountTypes, acc)}</span></td>
         {manual ? (
           <>
@@ -192,7 +192,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
         <td className="num"><button className="btn sm ghost" onClick={onToggle}>{expanded ? 'Luk' : 'Detaljer'}</button></td>
       </tr>
       {expanded && (
-        <tr className="sel"><td colSpan={6}><AccountDetails acc={acc} period={period} focusOpening={justAdded && acc.kind === 'tracked'} /></td></tr>
+        <tr className="drawer-row"><td colSpan={6}><AccountDetails acc={acc} period={period} focusOpening={justAdded && acc.kind === 'tracked'} /></td></tr>
       )}
     </Fragment>
   );
@@ -232,88 +232,100 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
     update((d) => ({ ...d, periods: d.periods.map((p) => (p.id === period.id ? { ...p, accountIds: (p.accountIds ?? d.accounts.filter((a) => !a.archived).map((a) => a.id)).filter((id) => id !== acc.id) } : p)) }));
 
   return (
-    <div className="col" style={{ gap: 12, padding: '6px 0 10px 18px' }}>
-      <div className="row" style={{ alignItems: 'flex-end' }}>
-        <label className="field">Navn<input value={acc.name} onChange={(ev) => patchAccount({ name: ev.target.value })} /></label>
-        <label className="field">Type
-          <TypeSelect value={acc.typeId} onChange={(typeId) => patchAccount({ typeId })} />
-        </label>
-        <label className="field grow" title="Navne kontoen har i andre kontis posteringstekster, fx 'Min opsparing'. Bruges til at genkende overførsler.">
-          Genkendes i overførselstekster som (komma-separeret)
-          <input value={aliases} onChange={(ev) => setAliases(ev.target.value)} onBlur={() => patchAccount({ aliases: aliases.split(',').map((x) => x.trim()).filter(Boolean) })} />
-        </label>
-      </div>
-      <label className="field">Kommentar for {period.name}
-        <textarea key={`${period.id}:${note}`} rows={2} defaultValue={note} placeholder="Fx rente 4 %, aftale om tilbagebetaling, hvor værdien kommer fra …"
-          onBlur={(ev) => setNote(ev.target.value.trim())} />
-      </label>
+    <div className="drawer">
+      <div className="drawer-grid">
+        <section className="drawer-sec">
+          <h4>Post</h4>
+          <div className="drawer-fields">
+            <label className="field">Navn<input value={acc.name} onChange={(ev) => patchAccount({ name: ev.target.value })} /></label>
+            <label className="field">Type<TypeSelect value={acc.typeId} onChange={(typeId) => patchAccount({ typeId })} /></label>
+          </div>
+          <label className="field" title="Navne kontoen har i andre kontis posteringstekster, fx 'Min opsparing'. Bruges til at genkende overførsler.">
+            Genkendes i overførselstekster som
+            <input value={aliases} placeholder="Komma-separeret, fx Min opsparing" onChange={(ev) => setAliases(ev.target.value)} onBlur={() => patchAccount({ aliases: aliases.split(',').map((x) => x.trim()).filter(Boolean) })} />
+          </label>
+        </section>
 
-      {!hasTx && (
-        <div className="row small">
-          <span className="ink2">Saldo:</span>
-          <div className="seg" role="radiogroup" aria-label="Saldo">
-            {(acc.kind === 'bank' ? (['bank', 'tracked', 'valuation'] as const) : (['tracked', 'valuation'] as const)).map((k) => (
-              <button key={k} className={acc.kind === k ? 'on plain' : ''} role="radio" aria-checked={acc.kind === k} title={KIND_HINT[k]} onClick={() => acc.kind !== k && setKind(k)}>{k === 'bank' ? 'Bankkonto' : KIND_LABEL[k]}</button>
-            ))}
-          </div>
-          {acc.kind === 'valuation' && <span className="muted">Skriv værdien pr. periodens start og slut i rækken ovenfor.</span>}
-        </div>
-      )}
-      {acc.kind === 'tracked' ? (
-        <div className="col" style={{ gap: 10 }}>
-          <TrackedOpening acc={acc} autoFocus={focusOpening} />
-          <SettleToggle acc={acc} />
-        </div>
-      ) : acc.kind === 'bank' ? (
-        <div className="row small">
-          <span className="ink2">Saldo følger importerede transaktioner.</span>
-          <button className="btn sm" onClick={() => setView('import')}>Importér transaktioner →</button>
-          <span className="spacer" />
-          <span className="ink2">Åbningssaldo (kun hvis den ikke kan udledes):</span>
-          <AmountInput className="sm" value={acc.openingBalance} placeholder="automatisk" onCommit={(v) => patchAccount({ openingBalance: v })} ariaLabel="Åbningssaldo" />
-        </div>
-      ) : (
-        <div className="col" style={{ gap: 6 }}>
-          <div className="row small">
-            <span className="ink2">Uforklaret ændring bogføres som</span>
-            <CategoryCombo className="sm" value={acc.defaultCategoryId} allowClear="Ukategoriseret" onChange={(c) => patchAccount({ defaultCategoryId: c })} />
-            {!acc.defaultCategoryId && <span className="neg">vælg kategori, ellers står den som ukategoriseret</span>}
-          </div>
-          {vUltimo && prev && residual !== undefined ? (
-            <table className="small" style={{ maxWidth: 640 }}>
-              <tbody>
-                <tr><td>Værdi {prev.date} → {vUltimo.date}</td><td className="num"><Money v={(vUltimo.value - prev.value) * sign} signed /></td></tr>
-                <tr><td>Heraf dine egne overførsler (indskud/afdrag)</td><td className="num"><Money v={moved * sign} signed /></td></tr>
-                {vUltimo.adjustments.map((a) => (
-                  <tr key={a.id}>
-                    <td><div className="row" style={{ flexWrap: 'nowrap' }}>Heraf <CategoryCombo className="sm" value={a.categoryId} onChange={(c) => c && patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: x.adjustments.map((y) => (y.id === a.id ? { ...y, categoryId: c } : y)) }))} />
-                      <button className="btn sm ghost" onClick={() => patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: x.adjustments.filter((y) => y.id !== a.id) }))} aria-label="Fjern">✕</button></div></td>
-                    <td className="num"><AmountInput className="sm" value={a.amount} autoFocus={a.id === newAdj} onCommit={(n) => patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: x.adjustments.map((y) => (y.id === a.id ? { ...y, amount: n ?? 0 } : y)) }))} /></td>
-                  </tr>
+        <section className="drawer-sec">
+          <h4>Saldo</h4>
+          <div>{!hasTx ? (
+              <div className="seg" role="radiogroup" aria-label="Saldo">
+                {(acc.kind === 'bank' ? (['bank', 'tracked', 'valuation'] as const) : (['tracked', 'valuation'] as const)).map((k) => (
+                  <button key={k} className={acc.kind === k ? 'on plain' : ''} role="radio" aria-checked={acc.kind === k} title={KIND_HINT[k]} onClick={() => acc.kind !== k && setKind(k)}>{k === 'bank' ? 'Bankkonto' : KIND_LABEL[k]}</button>
                 ))}
-                <tr className="sum"><td>Uforklaret → bogføres som {acc.defaultCategoryId ? data.categories.find((c) => c.id === acc.defaultCategoryId)?.name : 'ukategoriseret'} (effekt på egenkapital)</td><td className="num"><Money v={residual - adjSum} signed colored /></td></tr>
-              </tbody>
-            </table>
+              </div>
+            ) : <span className="chip">{KIND_LABEL.bank}</span>}</div>
+          {acc.kind === 'tracked' ? (
+            <TrackedOpening acc={acc} autoFocus={focusOpening} />
+          ) : acc.kind === 'bank' ? (
+            <>
+              <label className="field">Åbningssaldo (kun hvis den ikke kan udledes af filen)
+                <AmountInput className="sm" value={acc.openingBalance} placeholder="automatisk" onCommit={(v) => patchAccount({ openingBalance: v })} ariaLabel="Åbningssaldo" />
+              </label>
+              <div><button className="btn sm" onClick={() => setView('import')}>Importér transaktioner →</button></div>
+            </>
           ) : (
-            <span className="small muted">Angiv både primo og ultimo for at se, hvad ændringen består af.</span>
+            <>
+              <label className="field">Uforklaret ændring bogføres som
+                <CategoryCombo className="sm" value={acc.defaultCategoryId} allowClear="Ukategoriseret" onChange={(c) => patchAccount({ defaultCategoryId: c })} />
+              </label>
+              {!acc.defaultCategoryId && <span className="small neg">Vælg en kategori – ellers står ændringen som ukategoriseret.</span>}
+              <span className="small muted">Værdien pr. periodens start og slut skriver du i rækken ovenfor.</span>
+            </>
           )}
-          {vUltimo && prev && (
-            <div>
-              <button className="btn sm ghost" disabled={!data.categories.length} onClick={() => { const adjId = uid('adj'); setNewAdj(adjId); patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: [...x.adjustments, { id: adjId, categoryId: data.categories.find((c) => /skat/i.test(c.name))?.id ?? acc.defaultCategoryId ?? data.categories[0].id, amount: 0 }] })); }}>
-                + Specificér en del (fx skat eller gebyr)
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+        </section>
 
-      <div className="row">
-        <span className="spacer" />
+        {acc.kind === 'valuation' && (
+          <section className="drawer-sec full">
+            <h4>Ændringen i {period.name}</h4>
+            {vUltimo && prev && residual !== undefined ? (
+              <table className="small" style={{ maxWidth: 680 }}>
+                <tbody>
+                  <tr><td>Værdi {prev.date} → {vUltimo.date}</td><td className="num"><Money v={(vUltimo.value - prev.value) * sign} signed /></td></tr>
+                  <tr><td>Heraf dine egne overførsler (indskud/afdrag)</td><td className="num"><Money v={moved * sign} signed /></td></tr>
+                  {vUltimo.adjustments.map((a) => (
+                    <tr key={a.id}>
+                      <td><div className="row" style={{ flexWrap: 'nowrap' }}>Heraf <CategoryCombo className="sm" value={a.categoryId} onChange={(c) => c && patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: x.adjustments.map((y) => (y.id === a.id ? { ...y, categoryId: c } : y)) }))} />
+                        <button className="btn sm ghost" onClick={() => patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: x.adjustments.filter((y) => y.id !== a.id) }))} aria-label="Fjern">✕</button></div></td>
+                      <td className="num"><AmountInput className="sm" value={a.amount} autoFocus={a.id === newAdj} onCommit={(n) => patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: x.adjustments.map((y) => (y.id === a.id ? { ...y, amount: n ?? 0 } : y)) }))} /></td>
+                    </tr>
+                  ))}
+                  <tr className="sum"><td>Uforklaret → {acc.defaultCategoryId ? data.categories.find((c) => c.id === acc.defaultCategoryId)?.name : 'ukategoriseret'}</td><td className="num"><Money v={residual - adjSum} signed colored /></td></tr>
+                </tbody>
+              </table>
+            ) : (
+              <span className="small muted">Angiv både primo og ultimo for at se, hvad ændringen består af.</span>
+            )}
+            {vUltimo && prev && (
+              <div>
+                <button className="btn sm ghost" disabled={!data.categories.length} onClick={() => { const adjId = uid('adj'); setNewAdj(adjId); patchValuation(vUltimo.id, (x) => ({ ...x, adjustments: [...x.adjustments, { id: adjId, categoryId: data.categories.find((c) => /skat/i.test(c.name))?.id ?? acc.defaultCategoryId ?? data.categories[0].id, amount: 0 }] })); }}>
+                  + Specificér en del (fx skat eller gebyr)
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="drawer-sec full">
+          <h4>Kommentar for {period.name}</h4>
+          <textarea key={`${period.id}:${note}`} rows={2} defaultValue={note} placeholder="Fx rente 4 %, aftale om tilbagebetaling, hvor værdien kommer fra …"
+            onBlur={(ev) => setNote(ev.target.value.trim())} aria-label={`Kommentar for ${period.name}`} />
+        </section>
+
+        {acc.kind === 'tracked' && (
+          <section className="drawer-sec full">
+            <h4>Afstemning af udlæg</h4>
+            <SettleToggle acc={acc} />
+          </section>
+        )}
+      </div>
+
+      <footer className="drawer-foot">
         {isZero
           ? <button className="btn sm ghost" onClick={removeFromPeriod} title="Posten vises ikke længere i denne periodes balance (og kopieres ikke med til nye perioder herfra). Historikken bevares.">Fjern fra {period.name}</button>
-          : <span className="small muted" title="Kun poster, der står i 0 både primo og ultimo, kan fjernes fra perioden">Har en saldo i perioden</span>}
+          : <span className="small muted" title="Kun poster, der står i 0 både primo og ultimo, kan fjernes fra perioden">Kan ikke fjernes fra perioden – har en saldo</span>}
         <DeleteAccountButton acc={acc} />
-      </div>
+      </footer>
     </div>
   );
 }
@@ -437,12 +449,9 @@ function TrackedOpening({ acc, autoFocus }: { acc: Account; autoFocus?: boolean 
       return { ...d, openItems: [...rest, { id: item?.id ?? uid('oi'), date: bookStart, counterparty: acc.name, accountId: acc.id, amount: sign * v }] };
     });
   return (
-    <div className="row small">
-      <span className="ink2">Saldoen følger dine overførsler til og fra posten.</span>
-      <span className="spacer" />
-      <span className="ink2">Saldo ved bogføringsstart ({bookStart}):</span>
+    <label className="field">Saldo ved bogføringsstart ({bookStart})
       <AmountInput className="sm" value={item ? item.amount * sign : undefined} placeholder="0" onCommit={set} ariaLabel="Startsaldo" autoFocus={autoFocus} />
-    </div>
+    </label>
   );
 }
 

@@ -555,3 +555,20 @@ table.bs tr.drop-over td { box-shadow: inset 0 2px 0 var(--accent); }
 .infobox[open] > summary { color: var(--ink); margin-bottom: 6px; }
 .infobox-body { background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 6px; padding: 8px 12px; line-height: 1.5; }
 .review-bar .infobox, .card-head .infobox, .row .infobox { margin: 0; }
+
+/* Udfoldede rækker: rækken og dens panel er én samlet blok med en accentkant i venstre side */
+.caret { display: inline-block; width: 14px; color: var(--muted); font-size: 16px; line-height: 1; transition: transform 0.15s ease; transform-origin: 40% 55%; }
+.caret.open { transform: rotate(90deg); color: var(--accent); }
+tr.expanded > td { background: var(--surface-2); border-bottom-color: transparent; font-weight: 600; }
+tr.expanded > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-shadow: inset 3px 0 0 var(--accent); border-bottom: 1px solid var(--line-strong); }
+.drawer { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-left: 10px; }
+.drawer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px 24px; }
+.drawer-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.drawer-sec.full { grid-column: 1 / -1; }
+.drawer-sec h4 { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.drawer-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.drawer-fields input, .drawer-sec > label.field input, .drawer-sec textarea { width: 100%; }
+.drawer-sec label.field .amount-wrap { max-width: 220px; }
+.drawer-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.drawer .settle { border-top: 0; padding-top: 0; }

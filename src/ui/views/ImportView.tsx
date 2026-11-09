@@ -436,8 +436,8 @@ function ImportedFiles() {
         <thead><tr><th>Fil</th><th>Konto</th><th>Importeret</th><th>Dækker</th><th className="num">Transaktioner</th><th /></tr></thead>
         <tbody>
           {files.map((f) => [
-            <tr key={f.id} className={`click ${open === f.id ? 'sel' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpen(open === f.id ? undefined : f.id); }}>
-              <td><span className="caret">{open === f.id ? '▾' : '▸'}</span> {f.legacy ? <span className="muted" title="Importeret før Finstate huskede filnavne">{f.fileName}</span> : f.fileName}</td>
+            <tr key={f.id} className={`click ${open === f.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpen(open === f.id ? undefined : f.id); }}>
+              <td><span className={`caret ${open === f.id ? 'open' : ''}`} aria-hidden>›</span> {f.legacy ? <span className="muted" title="Importeret før Finstate huskede filnavne">{f.fileName}</span> : f.fileName}</td>
               <td>{accName(f.accountId)}</td>
               <td className="small">{when(f.importedAt)}</td>
               <td className="small">{f.first ? `${f.first} → ${f.last}` : '–'}</td>
@@ -453,7 +453,7 @@ function ImportedFiles() {
               </td>
             </tr>,
             open === f.id && (
-              <tr key={`${f.id}-c`} className="sel">
+              <tr key={`${f.id}-c`} className="drawer-row">
                 <td colSpan={6}>
                   <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
                     <table className="small">
