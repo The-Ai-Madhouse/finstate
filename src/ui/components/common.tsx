@@ -118,13 +118,16 @@ export type ComboOption = { id: string; label: string; group?: string; sub?: boo
  * Søgbar dropdown – samme adfærd overalt: åbner ved fokus, skriv for at filtrere, ↑/↓ for at flytte,
  * Enter for at vælge (og evt. gemme/gå videre via onCommit). Valgfrit: en "ingen"-mulighed øverst og "+ Opret …" nederst.
  */
-export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onCreate, createLabel, allowClear, placeholder = '— vælg —', searchPlaceholder = 'Søg…', ariaLabel, className, inputRef: extRef, emptyText = 'Intet matcher', needsChoice }: {
+export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onCreate, createLabel, allowClear, placeholder = '— vælg —', searchPlaceholder = 'Søg…', ariaLabel, className, inputRef: extRef, emptyText = 'Intet matcher', needsChoice, initialQuery, onQueryChange }: {
   options: ComboOption[];
   value?: string;
   onChange: (id: string | undefined) => void;
   onCommit?: (id: string) => void;
-  /** 1–3 i et tomt felt (bruges til at skifte type i kategoriseringen). */
-  onTypeKey?: (key: string) => void;
+  /** Skift type i kategoriseringen: 1/2 i et tomt felt, Alt+1/Alt+2 altid. Får søgeteksten med. */
+  onTypeKey?: (key: string, q: string) => void;
+  /** Søgetekst, feltet starter med ved første fokus (fx med over fra et typeskift). */
+  initialQuery?: string;
+  onQueryChange?: (q: string) => void;
   /** "+ Opret …" nederst – får søgeteksten med. */
   onCreate?: (q: string) => void;
   createLabel?: (q: string) => string;
@@ -145,6 +148,8 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
   const listRef = useRef<HTMLDivElement>(null);
   const ownRef = useRef<HTMLInputElement>(null);
   const inputRef = extRef ?? ownRef;
+  const initialUsed = useRef(false);
+  useEffect(() => { onQueryChange?.(q); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   type Opt = ComboOption & { isNew?: boolean; isClear?: boolean };
   const words = fold(q).split(/\s+/).filter(Boolean);
@@ -180,7 +185,11 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
         aria-label={ariaLabel}
         placeholder={open ? searchPlaceholder : allowClear ?? placeholder}
         value={open ? q : current?.label ?? ''}
-        onFocus={() => { setOpen(true); setQ(''); setHi(Math.max(0, opts.findIndex((o) => o.id === value || (o.isClear && !value)))); }}
+        onFocus={() => {
+          setOpen(true);
+          if (initialQuery && !initialUsed.current) { initialUsed.current = true; setQ(initialQuery); setHi(0); return; }
+          setQ(''); setHi(Math.max(0, opts.findIndex((o) => o.id === value || (o.isClear && !value))));
+        }}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onChange={(e) => { setQ(e.target.value); setHi(0); setOpen(true); }}
         onKeyDown={(e) => {
@@ -193,7 +202,9 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
             if (o) choose(o, true);
             else if (value) onCommit?.(value);
           } else if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false); setQ(''); } }
-          else if (onTypeKey && q === '' && /^[123]$/.test(e.key)) { e.preventDefault(); onTypeKey(e.key); }
+          else if (onTypeKey && e.altKey && /^Digit[12]$/.test(e.code)) { e.preventDefault(); e.stopPropagation(); onTypeKey(e.code.slice(5), q); }
+          // 1/2 skifter type – også med tekst i feltet, så længe teksten ikke er et tal (fx et beløb).
+          else if (onTypeKey && !e.altKey && /^[12]$/.test(e.key) && !/\d/.test(q)) { e.preventDefault(); e.stopPropagation(); onTypeKey(e.key, q); }
         }}
       />
       {open && (
@@ -221,11 +232,13 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
 }
 
 /** Søgbart kategorivalg (bygger på SearchCombo) – med "+ Ny kategori…" på stedet. */
-export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKind, className, allowClear, placeholder = '— vælg kategori —', ariaLabel = 'Kategori' }: {
+export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKind, className, allowClear, placeholder = '— vælg kategori —', ariaLabel = 'Kategori', initialQuery, onQueryChange }: {
   value?: string;
   onChange: (id: string | undefined) => void;
   onCommit?: (id: string) => void;
-  onTypeKey?: (key: string) => void;
+  onTypeKey?: (key: string, q: string) => void;
+  initialQuery?: string;
+  onQueryChange?: (q: string) => void;
   primaryKind?: 'income' | 'expense';
   className?: string;
   /** Vis en "ingen"-mulighed øverst (fx "Ukategoriseret"). */
@@ -259,7 +272,7 @@ export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKin
   }
   return (
     <SearchCombo className={className} options={options} value={value} onChange={onChange} onCommit={onCommit} onTypeKey={onTypeKey}
-      allowClear={allowClear} placeholder={placeholder} searchPlaceholder="Søg kategori…" ariaLabel={ariaLabel} inputRef={inputRef}
+      initialQuery={initialQuery} onQueryChange={onQueryChange} allowClear={allowClear} placeholder={placeholder} searchPlaceholder="Søg kategori…" ariaLabel={ariaLabel} inputRef={inputRef}
       emptyText="Ingen kategori matcher"
       onCreate={(q) => setCreating(q)} createLabel={(q) => (q ? `+ Opret "${q}" som ny kategori…` : '+ Ny kategori…')} />
   );
@@ -303,22 +316,32 @@ export function ClassEditor({ value, onChange, accountId, amount, compact, txId,
   const signKind = amount > 0 ? 'income' : amount < 0 ? 'expense' : undefined;
   const isPl = value.type === 'income' || value.type === 'expense';
   const wrapRef = useRef<HTMLDivElement>(null);
-  // Efter klik på en typeknap: markøren direkte i søgefeltet (kategori eller post), så man kan skrive med det samme.
+  // Søgeteksten følger med, når man skifter type (fx "jonas" skrevet i kategorifeltet → videre til postfeltet).
+  const lastQ = useRef('');
+  const [carry, setCarry] = useState<{ n: number; q: string }>({ n: 0, q: '' });
+  // Efter typeskift: markøren direkte i søgefeltet (kategori eller post), så man kan skrive videre.
   const focusSearch = () => setTimeout(() => wrapRef.current?.querySelector<HTMLInputElement>('.combo-input')?.focus(), 0);
+  const switchType = (k: TypeKey, q = lastQ.current) => {
+    setCarry((c) => ({ n: c.n + 1, q }));
+    onChange(withTypeKey(value, k, amount, categories));
+    focusSearch();
+  };
+  const onQ = (q: string) => { lastQ.current = q; };
   return (
     <div className="col class-editor-wrap" style={{ gap: 4 }} ref={wrapRef}>
       <div className="row class-editor">
-        <TypeSeg value={value.type} amount={amount} onChange={(k) => { onChange(withTypeKey(value, k, amount, categories)); focusSearch(); }} />
+        <TypeSeg value={value.type} amount={amount} onChange={(k) => switchType(k)} />
         {isPl && (
-          <CategoryCombo className={`grow ${sm}`} primaryKind={signKind} value={value.categoryId}
+          <CategoryCombo key={`c${carry.n}`} className={`grow ${sm}`} primaryKind={signKind} value={value.categoryId}
+            initialQuery={carry.q} onQueryChange={onQ}
             onChange={(categoryId) => onChange({ type: plTypeOf(categories.find((c) => c.id === categoryId), amount), categoryId })}
             onCommit={onCommit && ((categoryId) => onCommit({ type: plTypeOf(categories.find((c) => c.id === categoryId), amount), categoryId }))}
-            onTypeKey={(key) => onChange(withTypeKey(value, TYPE_KEYS[key], amount, categories))} />
+            onTypeKey={(key, q) => switchType(TYPE_KEYS[key], q)} />
         )}
         {value.type === 'internal' && (
-          <TargetSelect className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.targetAccountId} onChange={(targetAccountId) => onChange({ ...value, targetAccountId })}
+          <TargetSelect key={`t${carry.n}`} initialQuery={carry.q} onQueryChange={onQ} className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.targetAccountId} onChange={(targetAccountId) => onChange({ ...value, targetAccountId })}
             onCommit={onCommit && ((targetAccountId) => onCommit({ ...value, targetAccountId }))}
-            onTypeKey={(key) => onChange(withTypeKey(value, TYPE_KEYS[key], amount, categories))} />
+            onTypeKey={(key, q) => switchType(TYPE_KEYS[key], q)} />
         )}
       </div>
       <ClassHint value={value} amount={amount} txId={txId} />
@@ -371,11 +394,13 @@ export function KindSelect({ value, onChange, className }: { value: 'tracked' | 
 }
 
 /** Post på balancen (alle poster i én søgbar liste) – med mulighed for at oprette en ny post på stedet. */
-function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className, amount }: {
+function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className, amount, initialQuery, onQueryChange }: {
   value?: string;
   onChange: (id?: string) => void;
   onCommit?: (id: string) => void;
-  onTypeKey?: (key: string) => void;
+  onTypeKey?: (key: string, q: string) => void;
+  initialQuery?: string;
+  onQueryChange?: (q: string) => void;
   exclude?: string;
   className?: string;
   amount: number;
@@ -401,7 +426,8 @@ function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className
       setTimeout(() => inputRef.current?.focus(), 0);
     };
     return (
-      <div className="row newcat" style={{ flexWrap: 'nowrap' }} onKeyDown={(e) => { if (e.key === 'Enter' && (e.target as HTMLElement).getAttribute('role') !== 'combobox') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
+      <div className="row newcat newpost" onKeyDown={(e) => { if (e.key === 'Enter' && (e.target as HTMLElement).getAttribute('role') !== 'combobox') { e.preventDefault(); e.stopPropagation(); create(); } if (e.key === 'Escape') { e.stopPropagation(); setCreating(false); } }}>
+        <span className="small ink2">Ny post:</span>
         <input className="sm grow" autoFocus placeholder={amount < 0 ? 'Fx Jonas skylder mig' : 'Fx Jeg skylder Ida'} value={name} onChange={(e) => setName(e.target.value)} aria-label="Navn på post" />
         <TypeSelect className="sm" value={typeId} onChange={setTypeId} />
         <KindSelect className="sm" value={kind} onChange={setKind} />
@@ -416,6 +442,7 @@ function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className
     .map((a) => ({ id: a.id, label: a.name, hint: typeOf(a) ? `· ${typeOf(a)}` : undefined }));
   return (
     <SearchCombo className={className} options={options} value={value} onChange={onChange} onCommit={onCommit} onTypeKey={onTypeKey} inputRef={inputRef}
+      initialQuery={initialQuery} onQueryChange={onQueryChange}
       placeholder={`— hvor ${amount < 0 ? 'skal pengene hen' : 'kommer pengene fra'}? —`} searchPlaceholder="Søg post…" ariaLabel="Til/fra" needsChoice
       emptyText="Ingen post matcher"
       onCreate={(q) => { setName(q); setCreating(true); }} createLabel={(q) => (q ? `+ Opret "${q}" som ny post…` : '+ Ny post…')} />

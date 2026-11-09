@@ -94,6 +94,15 @@ export interface Tx {
   memo?: string;
 }
 
+/** En importeret fil: hvilke transaktioner den indeholdt (også dem, der fandtes i forvejen). */
+export interface ImportRecord {
+  id: string;
+  fileName: string;
+  accountId: string;
+  importedAt: string;
+  txIds: string[];
+}
+
 export interface Rule {
   id: string;
   /** Normaliseret tekst (se normalize.ts). */
@@ -218,6 +227,8 @@ export interface AppData {
   txs: Tx[];
   valuations: Valuation[];
   openItems: OpenItem[];
+  /** Importerede filer. */
+  imports: ImportRecord[];
   /** Afstemning af udlæg/tilgodehavender: hvad hører sammen. */
   matches: Match[];
   periods: Period[];

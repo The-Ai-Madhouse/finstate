@@ -95,14 +95,16 @@ export function demoData(): AppData {
   data.settings.bookStart = '2025-06-30';
   data.settings.bookStartSet = true;
   data.settings.rulesEnabled = false;
-  const imp = (csv: string, accountId: string): Tx[] => {
+  const imp = (csv: string, accountId: string, fileName: string): Tx[] => {
     const sheet = parseCsv(csv);
     const m = guessMapping(sheet);
     if (!isCompleteMapping(m)) throw new Error('demo mapping');
     data.importProfiles[sheet.headerSignature] = m;
-    return buildTxs(sheet, m, accountId).txs;
+    const txs = buildTxs(sheet, m, accountId).txs;
+    data.imports.push({ id: `imp-${accountId}`, fileName, accountId, importedAt: '2026-07-02T09:00:00.000Z', txIds: txs.map((t) => t.id) });
+    return txs;
   };
-  data.txs = [...imp(toCsv(lon, 12400_00), 'acc-loen'), ...imp(toCsv(ops, 52000_00), 'acc-ops')];
+  data.txs = [...imp(toCsv(lon, 12400_00), 'acc-loen', 'lonkonto-2025-07_2026-06.csv'), ...imp(toCsv(ops, 52000_00), 'acc-ops', 'opsparing-2025-07_2026-06.csv')];
   // Jonas betaler koncertbilletten tilbage – en intern overførsel fra posten "Jonas skylder mig".
   data.txs = data.txs.map((t) => (t.date === '2025-08-20' && t.text === 'MobilePay Jonas Lind' ? { ...t, manual: { type: 'internal', targetAccountId: 'acc-jonas' } } : t));
   data.valuations = [

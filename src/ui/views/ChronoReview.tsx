@@ -77,7 +77,8 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
     }, 80);
     setTimeout(() => setTargetId(undefined), 2600);
   }, [focusTxId]);
-  const sorted = useMemo(() => [...txs].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.seq - b.seq)), [txs]);
+  // Rækkefølgen kommer fra filterlinjen (standard: dato, ældst først).
+  const sorted = txs;
 
   // Alle transaktioner (i hele bogføringen) pr. "lignende"-nøgle – til "Lignende"-vinduet.
   const byKey = useMemo(() => {
@@ -187,12 +188,12 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
         <div className="grow">
           <div className="row" style={{ gap: 10 }}>
             <b>{pending.length ? `${pending.length} tilbage` : 'Alt er afgjort 🎉'}</b>
-            <span className="ink2 small">{done} af {scope.length} afgjort · {pct} %</span>{searching && <span className="chip" title="Søgningen ændrer kun, hvad du ser – ikke tællingen">viser {sorted.length} søgeresultater</span>}
+            <span className="ink2 small">{done} af {scope.length} afgjort · {pct} %</span>{searching && <span className="chip" title="Filtrene ændrer kun, hvad du ser – ikke tællingen">filtreret: viser {sorted.length}</span>}
             {handled > 0 && <span className="chip user">+{handled} i denne omgang</span>}
           </div>
           <div className="bigprogress" aria-hidden><div style={{ width: `${pct}%` }} /></div>
           <div className="small muted">
-            <b>Skriv</b> for at søge kategori · <b>↑/↓</b> vælg · <b>Enter</b> gem og videre · <b>1–2</b> type (i tomt felt) · <b>N</b> næste ubehandlede
+            <b>Skriv</b> for at søge kategori/post · <b>↑/↓</b> vælg · <b>Enter</b> gem og videre · <b>1</b>/<b>2</b> (eller Alt+1/2) indtægt-udgift/intern · <b>N</b> næste ubehandlede
           </div>
         </div>
         <label className="row small ink2"><input type="checkbox" checked={hideDone} onChange={(ev) => setHideDone(ev.target.checked)} /> Skjul afgjorte</label>
@@ -202,7 +203,7 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
           </button>
         )}
       </div>
-      {!shown.length ? <Empty>{searching ? 'Ingen transaktioner matcher søgningen.' : 'Alt i perioden er afgjort. 🎉'}</Empty> : (
+      {!shown.length ? <Empty>{searching ? 'Ingen transaktioner matcher filtrene.' : 'Alt i perioden er afgjort. 🎉'}</Empty> : (
         <div>
           {shown.map((t) => {
             const r = e.resolved.get(t.id)!;
@@ -249,7 +250,11 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
     const sib = (dir: 'next' | 'prev') => (dir === 'next' ? ev.currentTarget.nextElementSibling : ev.currentTarget.previousElementSibling) as HTMLElement | null;
     if (ev.key === 'ArrowDown') { sib('next')?.focus(); ev.preventDefault(); }
     else if (ev.key === 'ArrowUp') { sib('prev')?.focus(); ev.preventDefault(); }
-    else if (TYPE_KEYS[ev.key] && open) setCls(withTypeKey(cls, TYPE_KEYS[ev.key], tx.amount, e.data.categories));
+    else if (TYPE_KEYS[ev.key] && open) {
+      setCls(withTypeKey(cls, TYPE_KEYS[ev.key], tx.amount, e.data.categories));
+      const row = ev.currentTarget;
+      setTimeout(() => row.querySelector<HTMLInputElement>('.combo-input')?.focus(), 0);
+    }
   };
 
   const acc = e.data.accounts.find((a) => a.id === tx.accountId);

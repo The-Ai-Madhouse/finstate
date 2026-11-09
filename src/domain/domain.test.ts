@@ -546,3 +546,47 @@ describe('afstemning af udlæg', () => {
     expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
   });
 });
+
+describe('filtre i Kategorisér', () => {
+  it('matches amounts written with comma, dot or thousands separator', async () => {
+    const { amountMatches } = await import('./txfilter');
+    expect(amountMatches(-24900, '249,00')).toBe(true);
+    expect(amountMatches(-24900, '249,0')).toBe(true);
+    expect(amountMatches(-24900, '249.00')).toBe(true);
+    expect(amountMatches(123450, '1.234,5')).toBe(true);
+    expect(amountMatches(123450, '1234,50')).toBe(true);
+    expect(amountMatches(123450, '-1234')).toBe(false); // positivt beløb
+    expect(amountMatches(-24900, 'netto')).toBe(false);
+  });
+  it('filters by type, category (incl. subcategories), dates, amount and notes, and sorts', async () => {
+    const { filterTxs, DEFAULT } = { ...(await import('./txfilter')), DEFAULT: { q: '', type: 'all' as const, status: 'all' as const, withNote: false, sort: 'date-asc' as const } };
+    const d = demoData();
+    const e = buildEngine(d);
+    const f = (patch: object) => filterTxs(d.txs, e.resolved, d.categories, { ...DEFAULT, ...patch });
+    expect(f({ categoryId: 'ex-bolig' }).every((t) => /Husleje|Lysværket|Fiberby|Mobilselskabet/.test(t.text) || e.resolved.get(t.id)!.lines.some((l) => l.categoryId?.startsWith('ex-bolig')))).toBe(true);
+    expect(f({ type: 'internal' }).length).toBeGreaterThan(0);
+    expect(f({ from: '2026-01-01', to: '2026-01-31' }).every((t) => t.date.startsWith('2026-01'))).toBe(true);
+    expect(f({ min: '8.000', max: '9.000' }).every((t) => Math.abs(t.amount) >= 800000 && Math.abs(t.amount) <= 900000)).toBe(true);
+    expect(f({ withNote: true }).map((t) => t.text)).toEqual(['MobilePay Jonas Lind']);
+    const desc = f({ sort: 'amount-desc' });
+    expect(Math.abs(desc[0].amount)).toBeGreaterThanOrEqual(Math.abs(desc[desc.length - 1].amount));
+  });
+});
+
+describe('importerede filer', () => {
+  it('lists files and removes one without touching transactions another file also contains', async () => {
+    const { importFiles, removeImport } = await import('./imports');
+    const d = demoData();
+    const files = importFiles(d);
+    expect(files.map((f) => f.fileName).sort()).toEqual(['lonkonto-2025-07_2026-06.csv', 'opsparing-2025-07_2026-06.csv']);
+    const loen = files.find((f) => f.accountId === 'acc-loen')!;
+    // En anden fil med overlap: de første 10 transaktioner
+    const overlap = { id: 'imp-x', fileName: 'overlap.csv', accountId: 'acc-loen', importedAt: '2026-08-01T00:00:00Z', txIds: loen.txs.slice(0, 10).map((t) => t.id) };
+    const d2 = { ...d, imports: [...d.imports, overlap] };
+    const after = removeImport(d2, loen.id);
+    expect(after.txs.filter((t) => t.accountId === 'acc-loen').map((t) => t.id).sort()).toEqual(overlap.txIds.sort());
+    expect(after.imports.map((r) => r.id)).not.toContain(loen.id);
+    // Ældre data uden filregistrering vises som "Tidligere import"
+    expect(importFiles({ ...d, imports: [] }).every((f) => f.legacy)).toBe(true);
+  });
+});

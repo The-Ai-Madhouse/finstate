@@ -1,17 +1,18 @@
 import { NoPeriod } from '../components/PeriodPrompt';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NEEDS_REVIEW, type Resolved } from '../../domain/classify';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
-import { useStore } from '../../store/store';
+import { DEFAULT_LEDGER_FILTER, useStore, type LedgerFilter } from '../../store/store';
+import { activeFilterCount, filterTxs } from '../../domain/txfilter';
 import { ChronoReview } from './ChronoReview';
 import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
 import { saveRule, setManual, useEngine, usePeriod } from '../../store/actions';
-import { AccountSelect, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel } from '../components/common';
+import { AccountSelect, CategoryCombo, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel } from '../components/common';
 
 const clsOf = (r: Resolved): Classification => {
   const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
@@ -31,64 +32,49 @@ function LedgerInner() {
   const setTab = (t: Tab) => { setTabState(t); try { localStorage.setItem('finstate:ledgerTab', t); } catch { /* ok */ } };
   // Linket hertil til en bestemt transaktion: vis den i gennemgangen.
   const focusTxId = useStore((s) => s.focusTxId);
-  // Søgning og filtre ligger i store, så de er der stadig, når man kommer tilbage.
-  const { q, accountId, onlyPeriod } = useStore((s) => s.ledgerFilter);
+  // Filtre ligger i store, så de er der stadig, når man kommer tilbage.
+  const filter = useStore((s) => s.ledgerFilter);
   const setFilter = useStore((s) => s.setLedgerFilter);
-  const setQ = (v: string) => setFilter({ q: v });
-  const setAccountId = (v?: string) => setFilter({ accountId: v });
-  const setOnlyPeriod = (v: boolean) => setFilter({ onlyPeriod: v });
+  const setPeriod = useStore((s) => s.setPeriod);
   const e = useEngine();
-  const period = usePeriod();
+  const period = usePeriod()!;
   const { data } = e;
+
+  // Kun transaktioner i det valgte financial statement.
+  const periodTxs = useMemo(() => data.txs.filter((t) => t.date > data.settings.bookStart && inPeriod(t, period)), [data, period]);
+  // Omfang = periode + konto. Det bestemmer fremskridt og fejring – de øvrige filtre ændrer kun, hvad man ser.
+  const scope = useMemo(() => periodTxs.filter((t) => !filter.accountId || t.accountId === filter.accountId), [periodTxs, filter.accountId]);
+  const txs = useMemo(() => filterTxs(periodTxs, e.resolved, data.categories, filter), [periodTxs, e.resolved, data.categories, filter]);
+
   useEffect(() => {
     if (!focusTxId) return;
     setTabState('chrono');
-    // Ville filtrene skjule transaktionen, man linkes til, så løsn dem.
     const t = data.txs.find((x) => x.id === focusTxId);
     if (!t) return;
-    const patch: Partial<typeof filter> = {};
-    const filter = useStore.getState().ledgerFilter;
-    if (filter.accountId && filter.accountId !== t.accountId) patch.accountId = undefined;
-    if (filter.onlyPeriod && period && !inPeriod(t, period)) patch.onlyPeriod = false;
-    if (filter.q.trim()) patch.q = '';
-    if (Object.keys(patch).length) setFilter(patch);
+    // Ligger transaktionen i et andet financial statement, så skift til det.
+    if (!inPeriod(t, period)) { const p = data.periods.find((x) => inPeriod(t, x)); if (p) setPeriod(p.id); }
+    // Ville filtrene skjule den, så nulstil dem (sorteringen bevares).
+    const f = useStore.getState().ledgerFilter;
+    if (!filterTxs([t], e.resolved, data.categories, f).length) setFilter({ ...DEFAULT_LEDGER_FILTER, sort: f.sort });
   }, [focusTxId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Omfang = periode + konto. Det bestemmer fremskridt og fejring – søgning ændrer kun, hvad man ser.
-  const scope = useMemo(() => data.txs
-    .filter((t) => t.date > data.settings.bookStart)
-    .filter((t) => !onlyPeriod || !period || inPeriod(t, period))
-    .filter((t) => !accountId || t.accountId === accountId)
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq)), [data, onlyPeriod, period, accountId]);
-  const txs = useMemo(() => {
-    const nq = q.trim().toLowerCase();
-    // Tekst, bankens kategori, din egen note, bankens kommentar og beløb.
-    const hit = (t: Tx) =>
-      [t.text, t.bankCategory, t.bankSubcategory, t.memo, t.note].some((x) => (x ?? '').toLowerCase().includes(nq)) || String(t.amount / 100).includes(nq);
-    return nq ? scope.filter(hit) : scope;
-  }, [scope, q]);
 
   const review = txs.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source));
   const scopeReview = scope.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source)).length;
   const update = useStore((s) => s.update);
-  const excluded = period ? data.txs.filter((t) => inPeriod(t, period) && t.date <= data.settings.bookStart).length : 0;
+  const excluded = data.txs.filter((t) => inPeriod(t, period) && t.date <= data.settings.bookStart).length;
+  const nActive = activeFilterCount(filter);
 
   return (
     <div className="stack">
-      <div className="row">
-        <h1>Kategorisér</h1>
-        <span className="spacer" />
-        <AccountSelect value={accountId} onChange={setAccountId} placeholder="Alle konti" filter={(a) => a.kind === 'bank'} />
-        <input placeholder="Søg tekst, note, kategori, beløb…" value={q} onChange={(ev) => setQ(ev.target.value)} style={{ width: 220 }} />
-        <label className="row small ink2"><input type="checkbox" checked={onlyPeriod} onChange={(ev) => setOnlyPeriod(ev.target.checked)} /> Kun {period?.name ?? 'periode'}</label>
-      </div>
+      <h1>Kategorisér</h1>
+      <FilterBar total={periodTxs.length} shown={txs.length} />
       {!data.categories.length && (
         <div className="banner warn">
           <span className="grow">Du har ingen kategorier endnu. Indsæt et eksempeltræ (kan rettes bagefter) – eller opret dine egne undervejs med "+ Ny kategori…" i kategorivalget.</span>
           <button className="btn sm primary" onClick={() => update((d) => ({ ...d, categories: defaultCategories() }))}>Indsæt eksempeltræ</button>
         </div>
       )}
-      {excluded > 0 && period && (
+      {excluded > 0 && (
         <div className="banner warn">
           <span className="grow">{excluded} transaktioner i {period.name} ligger før bogføringsstart ({data.settings.bookStart}) og tæller derfor ikke med.</span>
           <button className="btn sm primary" onClick={() => update((d) => ({ ...d, settings: { ...d.settings, bookStart: addDays(period.start, -1), bookStartSet: true } }))}>
@@ -97,13 +83,71 @@ function LedgerInner() {
         </div>
       )}
       <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'chrono'} className={tab === 'chrono' ? 'on' : ''} onClick={() => setTab('chrono')}>Gennemgang, ældst først ({scopeReview} tilbage)</button>
+        <button role="tab" aria-selected={tab === 'chrono'} className={tab === 'chrono' ? 'on' : ''} onClick={() => setTab('chrono')}>Gennemgang ({scopeReview} tilbage)</button>
         <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'on' : ''} onClick={() => setTab('review')}>Grupperet</button>
         <button role="tab" aria-selected={tab === 'all'} className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>Alle transaktioner ({txs.length})</button>
       </div>
-      {period && onlyPeriod && !txs.length && !q && !accountId && data.txs.length > 0 ? (
+      {!periodTxs.length && data.txs.length > 0 ? (
         <EmptyPeriod />
-      ) : tab === 'chrono' ? <ChronoReview key={`${period?.id}|${accountId ?? 'alle'}|${onlyPeriod}`} txs={txs} scope={scope} searching={!!q.trim()} /> : tab === 'review' ? <ReviewGroups txs={review} /> : <TxTable txs={txs} />}
+      ) : tab === 'chrono' ? <ChronoReview key={`${period.id}|${filter.accountId ?? 'alle'}`} txs={txs} scope={scope} searching={nActive > (filter.accountId ? 1 : 0)} /> : tab === 'review' ? <ReviewGroups txs={review} /> : <TxTable txs={txs} />}
+    </div>
+  );
+}
+
+/** Filtre og sortering – altid synlige øverst, så man kan søge lidt og hurtigt komme tilbage. */
+function FilterBar({ total, shown }: { total: number; shown: number }) {
+  const f = useStore((s) => s.ledgerFilter);
+  const set = useStore((s) => s.setLedgerFilter);
+  const [more, setMore] = useState(() => !!(f.from || f.to || f.min || f.max || f.withNote));
+  const ref = useRef<HTMLDivElement>(null);
+  const n = activeFilterCount(f);
+  // Gennemgangens statuslinje skal klæbe under filterlinjen.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--filter-h', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => { ro.disconnect(); document.documentElement.style.setProperty('--filter-h', '0px'); };
+  }, []);
+  const seg = <K extends 'type' | 'status'>(key: K, opts: [LedgerFilter[K], string][]) => (
+    <div className="seg" role="radiogroup">
+      {opts.map(([v, l]) => <button key={v} className={f[key] === v ? 'on plain' : ''} role="radio" aria-checked={f[key] === v} onClick={() => set({ [key]: v } as Partial<LedgerFilter>)}>{l}</button>)}
+    </div>
+  );
+  return (
+    <div className="filter-bar" ref={ref}>
+      <div className="row">
+        <div className="search-wrap grow">
+          <input className="search-input" placeholder="Søg i tekst, noter, kommentarer, bankkategori eller beløb (fx 1.234,50)…" value={f.q}
+            onChange={(ev) => set({ q: ev.target.value })} onKeyDown={(ev) => ev.key === 'Escape' && set({ q: '' })} aria-label="Søg" />
+          {f.q && <button className="search-clear" onClick={() => set({ q: '' })} aria-label="Ryd søgning">✕</button>}
+        </div>
+        <AccountSelect className="sm" value={f.accountId} onChange={(accountId) => set({ accountId })} placeholder="Alle konti" filter={(a) => a.kind === 'bank'} />
+        <CategoryCombo className="sm" value={f.categoryId} onChange={(categoryId) => set({ categoryId })} allowClear="Alle kategorier" ariaLabel="Filtrér på kategori" />
+        <select className="sm" value={f.sort} onChange={(ev) => set({ sort: ev.target.value as LedgerFilter['sort'] })} aria-label="Sortér">
+          <option value="date-asc">Dato, ældst først</option>
+          <option value="date-desc">Dato, nyest først</option>
+          <option value="amount-desc">Beløb, største først</option>
+          <option value="amount-asc">Beløb, mindste først</option>
+        </select>
+      </div>
+      <div className="row small">
+        {seg('type', [['all', 'Alle typer'], ['income', 'Indtægt'], ['expense', 'Udgift'], ['internal', 'Intern']])}
+        {seg('status', [['all', 'Alle'], ['pending', 'Mangler afgørelse'], ['done', 'Afgjort']])}
+        <button className={`btn sm ghost ${more ? 'on' : ''}`} onClick={() => setMore(!more)}>{more ? 'Færre filtre ▴' : 'Dato, beløb, kommentar ▾'}</button>
+        <span className="spacer" />
+        <span className="muted">Viser {shown} af {total}</span>
+        {n > 0 && <button className="btn sm ghost" onClick={() => set({ ...DEFAULT_LEDGER_FILTER, sort: f.sort })}>Nulstil filtre ({n})</button>}
+      </div>
+      {more && (
+        <div className="row small">
+          <label className="row" style={{ gap: 4 }}>Fra <input type="date" className="sm" value={f.from ?? ''} onChange={(ev) => set({ from: ev.target.value || undefined })} /></label>
+          <label className="row" style={{ gap: 4 }}>Til <input type="date" className="sm" value={f.to ?? ''} onChange={(ev) => set({ to: ev.target.value || undefined })} /></label>
+          <label className="row" style={{ gap: 4 }}>Beløb fra <input className="sm num" style={{ width: 100 }} inputMode="decimal" placeholder="0" value={f.min ?? ''} onChange={(ev) => set({ min: ev.target.value })} /></label>
+          <label className="row" style={{ gap: 4 }}>til <input className="sm num" style={{ width: 100 }} inputMode="decimal" placeholder="∞" value={f.max ?? ''} onChange={(ev) => set({ max: ev.target.value })} /> kr</label>
+          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={f.withNote} onChange={(ev) => set({ withNote: ev.target.checked })} /> Kun med kommentar/note</label>
+        </div>
+      )}
     </div>
   );
 }

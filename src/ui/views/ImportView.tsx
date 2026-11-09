@@ -13,6 +13,7 @@ import { useStore } from '../../store/store';
 import { usePeriod } from '../../store/actions';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { importCoverage } from '../../domain/engine';
+import { importFiles, removeImport } from '../../domain/imports';
 import { dateDa } from '../../domain/format';
 import { AccountSelect, Empty, Money, SearchCombo } from '../components/common';
 
@@ -140,6 +141,7 @@ function ImportInner() {
         />
       ))}
       <AccountsSummary />
+      <ImportedFiles />
     </div>
   );
 }
@@ -200,6 +202,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
       let next: typeof d = {
         ...d,
         txs: [...d.txs.map((t) => (notes.has(t.id) ? { ...t, note: notes.get(t.id) } : t)), ...fresh],
+        imports: [...(d.imports ?? []), { id: uid('imp'), fileName: p.fileName, accountId, importedAt: new Date().toISOString(), txIds: preview.txs.map((t) => t.id) }],
         importProfiles: { ...d.importProfiles, [p.sheet.headerSignature]: p.mapping as ColumnMapping },
       };
       if (broker && setupSecurities) next = setupDepot(next, accountId, periodId);
@@ -363,7 +366,7 @@ function AccountsSummary() {
                     {o.length > 0 && (
                       <button className="btn sm ghost danger" onClick={() => {
                         if (confirm(`Slet alle ${o.length} transaktioner på ${a.name}? Dine regler bevares, men manuelle valg på disse transaktioner forsvinder.`))
-                          update((d) => ({ ...d, txs: d.txs.filter((t) => t.accountId !== a.id) }));
+                          update((d) => ({ ...d, txs: d.txs.filter((t) => t.accountId !== a.id), imports: (d.imports ?? []).filter((r) => r.accountId !== a.id) }));
                       }}>Slet</button>
                     )}
                   </td>
@@ -413,4 +416,68 @@ function setupDepot(d: import('../../domain/types').AppData, cashAccountId: stri
     rules.push({ id: uid('rule'), pattern: w.pattern, match: 'contains', accountId: cashAccountId, then: w.then, createdAt: new Date().toISOString() });
   }
   return withAccountInPeriods({ ...d, accounts, rules }, secId, periodId);
+}
+
+/** De filer, du har importeret – med indhold, og mulighed for at fjerne en fil igen. */
+function ImportedFiles() {
+  const data = useStore((s) => s.data);
+  const update = useStore((s) => s.update);
+  const [open, setOpen] = useState<string>();
+  const [asking, setAsking] = useState<string>();
+  const files = importFiles(data);
+  if (!files.length) return null;
+  const accName = (id: string) => data.accounts.find((a) => a.id === id)?.name ?? '(slettet konto)';
+  const when = (iso: string) => { const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleString('da-DK', { dateStyle: 'medium', timeStyle: 'short' }); };
+  return (
+    <div className="card">
+      <h2>Importerede filer</h2>
+      <p className="ink2 small" style={{ marginBottom: 10 }}>Klik på en fil for at se indholdet. Fjerner du en fil, slettes dens transaktioner – undtagen dem, som en anden af dine filer også indeholder.</p>
+      <table>
+        <thead><tr><th>Fil</th><th>Konto</th><th>Importeret</th><th>Dækker</th><th className="num">Transaktioner</th><th /></tr></thead>
+        <tbody>
+          {files.map((f) => [
+            <tr key={f.id} className={`click ${open === f.id ? 'sel' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpen(open === f.id ? undefined : f.id); }}>
+              <td><span className="caret">{open === f.id ? '▾' : '▸'}</span> {f.legacy ? <span className="muted" title="Importeret før Finstate huskede filnavne">{f.fileName}</span> : f.fileName}</td>
+              <td>{accName(f.accountId)}</td>
+              <td className="small">{when(f.importedAt)}</td>
+              <td className="small">{f.first ? `${f.first} → ${f.last}` : '–'}</td>
+              <td className="num">{f.txs.length}{f.onlyHere < f.txs.length && <div className="small muted">{f.txs.length - f.onlyHere} også i andre filer</div>}</td>
+              <td className="num">
+                {asking === f.id ? (
+                  <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+                    <span className="small">Slet {f.onlyHere} transaktioner{f.onlyHere ? ' og dine valg på dem' : ''}?</span>
+                    <button className="btn sm" onClick={() => setAsking(undefined)}>Annullér</button>
+                    <button className="btn sm danger-solid" onClick={() => { update((d) => removeImport(d, f.id)); setAsking(undefined); setOpen(undefined); }}>Fjern fil</button>
+                  </span>
+                ) : <button className="btn sm ghost danger" onClick={() => setAsking(f.id)}>Fjern</button>}
+              </td>
+            </tr>,
+            open === f.id && (
+              <tr key={`${f.id}-c`} className="sel">
+                <td colSpan={6}>
+                  <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
+                    <table className="small">
+                      <thead><tr><th>Dato</th><th>Tekst</th><th>Bankens kategori</th><th>Kommentar</th><th className="num">Beløb</th><th className="num">Saldo</th></tr></thead>
+                      <tbody>
+                        {f.txs.map((t) => (
+                          <tr key={t.id}>
+                            <td style={{ whiteSpace: 'nowrap' }}>{t.date}</td>
+                            <td className="ellipsis" style={{ maxWidth: 340 }} title={t.text}>{t.text}</td>
+                            <td className="muted">{t.bankCategory}{t.bankSubcategory ? ` › ${t.bankSubcategory}` : ''}</td>
+                            <td>{t.note}{t.memo && <div className="muted">✎ {t.memo}</div>}</td>
+                            <td className="num"><Money v={t.amount} decimals colored /></td>
+                            <td className="num">{t.balance !== undefined ? <Money v={t.balance} decimals /> : ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            ),
+          ])}
+        </tbody>
+      </table>
+    </div>
+  );
 }

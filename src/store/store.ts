@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import { emptyData } from '../domain/defaults';
 import { withAutoBookStart } from '../domain/engine';
+import type { TxFilter } from '../domain/txfilter';
 import type { AppData } from '../domain/types';
 
 export type View = 'overview' | 'import' | 'ledger' | 'transfers' | 'balance' | 'statement' | 'slides' | 'settings';
@@ -27,7 +28,8 @@ interface State {
   setPeriod: (id?: string) => void;
 }
 
-export interface LedgerFilter { q: string; accountId?: string; onlyPeriod: boolean }
+export type LedgerFilter = TxFilter;
+export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status: 'all', withNote: false, sort: 'date-asc' };
 
 const KEY = 'finstate:v1';
 
@@ -50,7 +52,7 @@ export const useStore = create<State>()(
     (set) => ({
       data: emptyData(),
       view: 'overview',
-      ledgerFilter: { q: '', onlyPeriod: true },
+      ledgerFilter: DEFAULT_LEDGER_FILTER,
       setLedgerFilter: (patch) => set((s) => ({ ledgerFilter: { ...s.ledgerFilter, ...patch } })),
       update: (recipe) =>
         set((s) => {
