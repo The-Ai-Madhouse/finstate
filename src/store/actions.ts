@@ -1,5 +1,5 @@
-import { pairItems, removeFromMatches, withSettle, writeOffDifference } from '../domain/settle';
-import { linkTxs } from '../domain/links';
+import { pairItems, removeFromMatches, withCarry, withSettle, writeOffDifference } from '../domain/settle';
+import { linkTxs, unlinkTx } from '../domain/links';
 import { useMemo } from 'react';
 import { ruleFromTx, splitLines } from '../domain/classify';
 import { buildEngine, type Engine } from '../domain/engine';
@@ -78,7 +78,7 @@ const plType = (d: AppData, categoryId: string, amount: number): 'income' | 'exp
  * posten kommer med i periodens afstemning, og de to lægges i samme gruppe.
  * Går det ikke op, kan resten afskrives som en kategori – ellers bliver den stående på posten.
  */
-export function pairOnPost(period: Period, postId: string, aId: string, bId: string, writeOffCategoryId?: string) {
+export function pairOnPost(period: Period, postId: string, aId: string, bId: string, writeOffCategoryId?: string, carry?: boolean) {
   update((d) => {
     const toPost = (t: Tx): Tx => {
       if (t.id !== aId && t.id !== bId) return t;
@@ -87,13 +87,15 @@ export function pairOnPost(period: Period, postId: string, aId: string, bId: str
       return n;
     };
     let n: AppData = { ...d, txs: d.txs.map(toPost) };
+    // Var de parret som udgift/indtægt før, er de det ikke længere.
+    for (const id of [aId, bId]) if (n.txs.find((t) => t.id === id)?.link) n = unlinkTx(n, id);
     n = withSettle(n, period.id, postId, true);
     const into = (n.matches ?? []).find((m) => m.accountId === postId && m.keys.includes(`tx:${aId}`) && m.keys.length > 1)?.id;
     n = pairItems(n, postId, [`tx:${aId}`, `tx:${bId}`], into);
-    if (writeOffCategoryId) {
-      const m = n.matches.find((x) => x.accountId === postId && x.keys.includes(`tx:${aId}`));
-      if (m) n = writeOffDifference(n, buildEngine(n).ledger, m.id, writeOffCategoryId, period);
-    }
+    const m = n.matches.find((x) => x.accountId === postId && x.keys.includes(`tx:${aId}`));
+    // Resten: afskrives ind i samme gruppe på posten – eller tages med til næste periode.
+    if (m && writeOffCategoryId) n = writeOffDifference(n, buildEngine(n).ledger, m.id, writeOffCategoryId, period);
+    else if (m && carry) n = withCarry(n, period.id, `match:${m.id}`, true);
     return n;
   });
 }
@@ -113,7 +115,8 @@ export function pairPlain(aId: string, bId: string, categoryId: string) {
         return x;
       }),
     };
-    return linkTxs(n, aId, bId);
+    // Var de afstemt på en post før, er de det ikke længere.
+    return linkTxs(removeFromMatches(n, [`tx:${aId}`, `tx:${bId}`]), aId, bId);
   });
 }
 
