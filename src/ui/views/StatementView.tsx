@@ -1,4 +1,4 @@
-import { ancestors, categoryPath, flattenTree } from '../../domain/categories';
+import { ancestors } from '../../domain/categories';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { useState } from 'react';
 import { inPeriod } from '../../domain/engine';
@@ -8,7 +8,7 @@ import { withValuation } from '../../domain/accountTypes';
 import { addDays } from '../../domain/util';
 import type { Period } from '../../domain/types';
 import { kr, kr2f, pctf, signedKr } from '../../domain/format';
-import { cashflow, fixedExpensesByMonth, isPassive, perMonth, type Cashflow } from '../../domain/cashflow';
+import { cashflow, isPassive, perMonth, type Cashflow } from '../../domain/cashflow';
 import { noteFor, typeName } from '../../domain/accountTypes';
 import { valuationResultInPeriod, type BsRow, type CatTotal, type Statement } from '../../domain/ledger';
 import { TX_TYPE_LABEL } from '../../domain/types';
@@ -117,8 +117,6 @@ export function StatementView() {
         <div className="card"><h2>Udgifter pr. kategori</h2><BarCompare rows={rowsFor(s.expense, prev?.expense)} nowLabel={view.name} prevLabel={prevP?.name} /></div>
         <div className="card"><h2>Indtægter pr. kategori</h2><BarCompare rows={rowsFor(s.income, prev?.income)} nowLabel={view.name} prevLabel={prevP?.name} /></div>
       </div>
-      <FixedMonthly period={view} />
-
       <p className="small muted row">
         Kontrol: egenkapital primo {kr(s.equityOpen)} + resultat {kr(s.result)}{s.openingInPeriod ? ` + åbningsposter ${kr(s.openingInPeriod)}` : ''} = ultimo {kr(s.equityClose)}{' '}
         {s.equityOpen + s.result + s.openingInPeriod === s.equityClose ? <span className="pos">✓ går op</span> : <span className="neg">✗ går ikke op</span>}
@@ -175,9 +173,9 @@ function PlSection({ title, kind, now, uncat, total, months, compareTo, period }
       <button className={`chip passive-chip ${kind} ${isPassive(categories, id) ? 'on' : ''}`}
         title={kind === 'income'
           ? 'Passiv indkomst = penge der arbejder for dig (renter, afkast, udbytte …). Klik for at ændre.'
-          : 'Fast udgift = løber af sig selv hver måned (husleje, abonnementer, forsikringer, transportkort …). Klik for at markere – de vises måned for måned nederst.'}
+          : 'Passiv udgift = fast udgift der løber af sig selv (abonnementer, husleje, transportkort …). Klik for at markere.'}
         onClick={(ev) => { ev.stopPropagation(); togglePassive(id); }}>
-        {kind === 'income' ? 'passiv' : 'fast'}
+        passiv
       </button>
     );
   /** En kategori og – når den er foldet ud – dens underkategorier, i vilkårlig dybde. */
@@ -241,12 +239,12 @@ function Summary({ s, cf, cfPrev, prevName }: { s: Statement; cf: Cashflow; cfPr
         <div className="num"><div className="fs-big"><Money v={cf.passiveM} /></div><div className="small muted">pr. måned</div>{vs(cf.passiveM, cfPrev?.passiveM)}</div>
       </div>
       <div className="fs-sum-row">
-        <div><b>Faste udgifter</b><div className="small muted">{cf.passiveExpense ? 'udgifter, der løber af sig selv hver måned' : 'markér faste udgifter med "fast" i udgiftslisten'}</div></div>
+        <div><b>Passive udgifter</b><div className="small muted">{cf.passiveExpense ? 'faste udgifter, der løber af sig selv' : 'markér faste udgifter med "passiv" i udgiftslisten'}</div></div>
         <div className="num"><div className="fs-mid"><Money v={cf.passiveExpenseM} /></div><div className="small muted">pr. måned</div>{cf.passiveExpense ? vs(cf.passiveExpenseM, cfPrev?.passiveExpenseM, false) : null}</div>
       </div>
       {cov !== null && (
         <div className="fs-freedom" title="Når den passive indkomst dækker udgifterne (100 %), er du ude af 'rotteræset'">
-          <div className="row small"><span className="ink2">Passiv indkomst dækker</span><span className="spacer" /><b>{pctf(Math.min(cov, 9.99))}</b><span className="ink2">af {cf.passiveExpense ? 'de faste udgifter' : 'udgifterne'}</span></div>
+          <div className="row small"><span className="ink2">Passiv indkomst dækker</span><span className="spacer" /><b>{pctf(Math.min(cov, 9.99))}</b><span className="ink2">af {cf.passiveExpense ? 'de passive udgifter' : 'udgifterne'}</span></div>
           <div className="bigprogress"><div style={{ width: `${Math.min(100, cov * 100)}%` }} /></div>
         </div>
       )}
@@ -354,71 +352,5 @@ function MidYearValues({ period }: { period: Period }) {
         })}
       </div>
     </div>
-  );
-}
-
-const MONTH_SHORT = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
-
-/** Nederst i regnskabet: de faste udgifter måned for måned – vælg dem her eller med "fast" i udgiftslisten. */
-function FixedMonthly({ period }: { period: Period }) {
-  const e = useEngine();
-  const update = useStore((st) => st.update);
-  const { categories } = e.data;
-  const fx = fixedExpensesByMonth(categories, e.ledger, period);
-  const crossesYear = fx.months.length > 0 && fx.months[0].slice(0, 4) !== fx.months[fx.months.length - 1].slice(0, 4);
-  const mLabel = (m: string) => `${MONTH_SHORT[Number(m.slice(5)) - 1]}${crossesYear ? ` ${m.slice(2, 4)}` : ''}`;
-  const avg = (total: number) => (fx.months.length ? Math.round(total / fx.months.length) : 0);
-  const setFixed = (id: string, passive: boolean) => update((d) => ({ ...d, categories: d.categories.map((c) => (c.id === id ? { ...c, passive } : c)) }));
-  const candidates = flattenTree(categories, categories.filter((c) => !c.parentId && c.kind === 'expense'))
-    .filter(({ cat }) => !isPassive(categories, cat.id))
-    .map(({ cat, depth }) => ({ id: cat.id, label: depth ? categoryPath(categories, cat.id) : cat.name, sub: depth > 0, depth }));
-  // Beløb i hele kroner uden "kr" i hver celle, så et helt år kan stå på én linje.
-  const n = (v: number) => new Intl.NumberFormat('da-DK', { maximumFractionDigits: 0 }).format(Math.round(v / 100));
-  const cell = (v: number) => (v ? n(v) : <span className="muted">–</span>);
-  return (
-    <section className="fs-card">
-      <div className="row">
-        <h2 className="fs-title grow" style={{ margin: 0 }}>Faste udgifter pr. måned <span className="small muted" style={{ fontWeight: 400 }}>i kr.</span></h2>
-        <SearchCombo className="sm" options={candidates} value={undefined} placeholder="+ Markér fast udgift…" searchPlaceholder="Søg udgiftskategori…"
-          ariaLabel="Markér kategori som fast udgift" emptyText="Ingen kategori matcher" onChange={(id) => id && setFixed(id, true)} />
-      </div>
-      {!fx.rows.length ? (
-        <p className="small muted" style={{ marginTop: 10 }}>
-          Ingen faste udgifter i perioden endnu. Vælg dem ovenfor – eller klik på "fast" ved en udgift i resultatopgørelsen – fx husleje, abonnementer og forsikringer.
-        </p>
-      ) : (
-        <div className="table-wrap" style={{ marginTop: 10 }}>
-          <table className="fs-table fixed-table">
-            <thead>
-              <tr>
-                <th>Kategori</th>
-                {fx.months.map((m) => <th key={m} className="num">{mLabel(m)}</th>)}
-                <th className="num">Gns./md.</th>
-                <th className="num">I alt</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {fx.rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="ellipsis" style={{ maxWidth: 240 }} title={r.label}>{r.label}</td>
-                  {r.byMonth.map((v, i) => <td key={i} className="num">{cell(v)}</td>)}
-                  <td className="num"><b>{n(avg(r.total))}</b></td>
-                  <td className="num">{n(r.total)}</td>
-                  <td className="num"><button className="btn sm ghost" title="Ikke længere en fast udgift" aria-label={`Fjern ${r.label} fra faste udgifter`} onClick={() => setFixed(r.id, false)}>✕</button></td>
-                </tr>
-              ))}
-              <tr className="sum">
-                <td>Faste udgifter i alt</td>
-                {fx.totals.map((v, i) => <td key={i} className="num">{cell(v)}</td>)}
-                <td className="num">{n(avg(fx.total))}</td>
-                <td className="num">{n(fx.total)}</td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
   );
 }

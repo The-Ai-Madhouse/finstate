@@ -1,6 +1,6 @@
-import type { CatTotal, Ledger, Statement } from './ledger';
+import type { CatTotal, Statement } from './ledger';
 import type { Category, Period } from './types';
-import { ancestors, categoryPath } from './categories';
+import { ancestors } from './categories';
 import { elapsedEnd } from './periods';
 import { dayDiff } from './util';
 
@@ -76,57 +76,4 @@ export function cashflow(s: Statement, categories: Category[]): Cashflow {
     // Har du markeret passive udgifter, måles dækningen mod dem; ellers mod alle udgifter.
     passiveCoverage: passiveExpense > 0 ? passive / passiveExpense : s.expenseTotal > 0 ? passive / s.expenseTotal : null,
   };
-}
-
-export interface FixedRow {
-  /** Den øverste kategori, du har markeret som fast (dens underkategorier tæller med). */
-  id: string;
-  label: string;
-  /** Beløb pr. måned (positive = udgift), samme rækkefølge som months. */
-  byMonth: number[];
-  total: number;
-}
-
-/** "2025-03" for hver måned i perioden – for et igangværende år kun til og med i dag. */
-export function monthsOf(p: Pick<Period, 'start' | 'end'>): string[] {
-  const end = elapsedEnd(p).slice(0, 7);
-  const out: string[] = [];
-  let [y, m] = p.start.slice(0, 7).split('-').map(Number);
-  for (let k = `${y}-${String(m).padStart(2, '0')}`; k <= end; k = `${y}-${String(m).padStart(2, '0')}`) {
-    out.push(k);
-    if (++m > 12) { m = 1; y++; }
-  }
-  return out;
-}
-
-/**
- * Faste udgifter måned for måned: én række pr. kategori, du har markeret som fast
- * (den øverste markerede i træet – underkategorier tæller med, medmindre de er fravalgt).
- */
-export function fixedExpensesByMonth(categories: Category[], ledger: Ledger, p: Pick<Period, 'start' | 'end'>) {
-  const months = monthsOf(p);
-  const idx = new Map(months.map((m, i) => [m, i]));
-  const rowOf = new Map<string, string | null>();
-  const rowFor = (catId: string): string | null => {
-    if (rowOf.has(catId)) return rowOf.get(catId)!;
-    const path = ancestors(categories, catId);
-    let row: string | null = null;
-    if (path.length && path[0].kind === 'expense' && isPassive(categories, catId)) row = (path.find((c) => isPassive(categories, c.id)) ?? path[path.length - 1]).id;
-    rowOf.set(catId, row);
-    return row;
-  };
-  const rows = new Map<string, FixedRow>();
-  for (const x of ledger.postings) {
-    if (!x.ref.startsWith('cat:') || x.date < p.start || x.date > p.end) continue;
-    const i = idx.get(x.date.slice(0, 7));
-    if (i === undefined) continue;
-    const id = rowFor(x.ref.slice(4));
-    if (!id) continue;
-    const r = rows.get(id) ?? rows.set(id, { id, label: categoryPath(categories, id), byMonth: months.map(() => 0), total: 0 }).get(id)!;
-    r.byMonth[i] -= x.amount;
-    r.total -= x.amount;
-  }
-  const list = [...rows.values()].sort((a, b) => b.total - a.total);
-  const totals = months.map((_, i) => list.reduce((s, r) => s + r.byMonth[i], 0));
-  return { months, rows: list, totals, total: totals.reduce((s, v) => s + v, 0) };
 }

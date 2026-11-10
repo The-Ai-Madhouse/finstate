@@ -713,22 +713,3 @@ describe('periode for en importeret fil', () => {
     expect(importFiles(d).find((x) => x.id === 'imp-acc-loen')!.declared).toBe(false);
   });
 });
-
-describe('faste udgifter pr. måned', () => {
-  it('lists each marked category month by month, with subcategories and opt-outs', async () => {
-    const { fixedExpensesByMonth, monthsOf } = await import('./cashflow');
-    const d = demoData();
-    const cats = d.categories.map((c) => (c.id === 'ex-bolig' ? { ...c, passive: true } : c.id === 'ex-bolig--internet' ? { ...c, passive: false } : c));
-    const e = buildEngine({ ...d, categories: cats });
-    const fx = fixedExpensesByMonth(cats, e.ledger, d.periods[0]);
-    expect(fx.months).toHaveLength(12);
-    expect(fx.rows.map((r) => r.id)).toEqual(['ex-bolig']);
-    // Husleje 8.450 hver måned + el – men ikke internet (fravalgt).
-    expect(fx.rows[0].byMonth.every((v) => v >= 845000)).toBe(true);
-    const bolig = e.statement(d.periods[0]).expense.find((c) => c.id === 'ex-bolig')!;
-    const internet = bolig.children.find((c) => c.id === 'ex-bolig--internet')!.amount;
-    expect(fx.total).toBe(bolig.amount - internet);
-    expect(monthsOf({ start: '2026-01-01', end: '2026-12-31' }).length).toBeLessThanOrEqual(12);
-    expect(monthsOf({ start: '2025-11-01', end: '2026-02-28' })).toEqual(['2025-11', '2025-12', '2026-01', '2026-02']);
-  });
-});
