@@ -821,3 +821,22 @@ describe('penge undervejs fra forrige periode', () => {
     expect([c2.remaining, c2.landed.map((x) => [x.tx.id, x.chosen])]).toEqual([0, [[cand[0].id, true]]]);
   });
 });
+
+describe('flyt kategorier', () => {
+  it('reorders siblings, moves under another parent, and refuses cycles or other kinds', async () => {
+    const { moveCategory, childrenOf } = await import('./categories');
+    const cats = defaultCategories();
+    const names = (cs: typeof cats, parent?: string) => childrenOf(cs, parent).filter((c) => c.kind === 'expense').map((c) => c.name);
+    // Dagligvarer foran Bolig
+    let m = moveCategory(cats, 'ex-dagligvarer', { before: 'ex-bolig' });
+    expect(names(m).slice(0, 2)).toEqual(['Dagligvarer', 'Bolig']);
+    // Spisesteder ind under Dagligvarer (sidst)
+    m = moveCategory(m, 'ex-spisesteder', { parentId: 'ex-dagligvarer' });
+    expect(names(m, 'ex-dagligvarer')).toEqual(['Spisesteder']);
+    // Tilbage til øverste niveau
+    expect(moveCategory(m, 'ex-spisesteder', { parentId: null }).find((c) => c.id === 'ex-spisesteder')!.parentId).toBeUndefined();
+    // Ikke ind under sig selv / sin egen underkategori, og ikke over i en anden slags
+    expect(moveCategory(m, 'ex-dagligvarer', { parentId: 'ex-spisesteder' })).toBe(m);
+    expect(moveCategory(m, 'ex-bolig', { before: 'in-loen' })).toBe(m);
+  });
+});

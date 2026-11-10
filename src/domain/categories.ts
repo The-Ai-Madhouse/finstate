@@ -43,3 +43,24 @@ export function flattenTree(categories: Category[], roots: Category[] = categori
   for (const r of roots) walk(r, 0);
   return out;
 }
+
+/**
+ * Flyt en kategori: foran en anden (bliver dens søskende) eller sidst under en ny overkategori (null = øverste niveau).
+ * Rækkefølgen blandt søskende er rækkefølgen i listen. En kategori kan ikke flyttes ind under sig selv.
+ */
+export function moveCategory(categories: Category[], id: string, to: { before?: string; parentId?: string | null }): Category[] {
+  const c = categories.find((x) => x.id === id);
+  if (!c || to.before === id) return categories;
+  const target = to.before ? categories.find((x) => x.id === to.before) : undefined;
+  if (to.before && !target) return categories;
+  const parentId = target ? target.parentId : to.parentId ?? undefined;
+  const parent = parentId ? categories.find((x) => x.id === parentId) : undefined;
+  if (parentId && (!parent || descendants(categories, id).includes(parentId))) return categories;
+  if (target && target.kind !== c.kind) return categories;
+  if (parent && parent.kind !== c.kind) return categories;
+  const moved: Category = { ...c };
+  if (parentId) moved.parentId = parentId; else delete moved.parentId;
+  const rest = categories.filter((x) => x.id !== id);
+  const at = target ? rest.findIndex((x) => x.id === target.id) : rest.length;
+  return [...rest.slice(0, at), moved, ...rest.slice(at)];
+}

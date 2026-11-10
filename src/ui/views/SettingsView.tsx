@@ -1,18 +1,18 @@
-import { childrenOf, descendants } from '../../domain/categories';
+import { CategoriesSettings } from './CategoriesSettings';
 import { compareOptions } from '../../domain/periods';
 import { deleteStatement, withNewPeriod } from '../components/PeriodPrompt';
 import { useEffect, useMemo, useState } from 'react';
 import { applyBackup, parseBackup } from '../../domain/backup';
 import { ruleMatches } from '../../domain/classify';
 import { demoData } from '../../domain/demo';
-import { defaultCategories, emptyData, newCategoryId } from '../../domain/defaults';
+import { emptyData } from '../../domain/defaults';
 import { normalizeText } from '../../domain/normalize';
-import { TX_TYPE_LABEL, bankKey, type Account, type Category, type Rule, type TxType } from '../../domain/types';
+import { TX_TYPE_LABEL, bankKey, type Account, type Rule, type TxType } from '../../domain/types';
 import { uid } from '../../domain/util';
 import { deleteRule, setBankMap, upsertRule, useEngine } from '../../store/actions';
 import { storageUsage, useStore } from '../../store/store';
 import { exportBackup } from '../backup';
-import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, KIND_NAME, SearchCombo, TypeSelect, InfoBox } from '../components/common';
+import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, SearchCombo, TypeSelect, InfoBox } from '../components/common';
 import { KIND_LABEL, NO_TYPE, addAccountType } from '../../domain/accountTypes';
 
 type Tab = 'accounts' | 'categories' | 'rules' | 'bank' | 'periods' | 'data';
@@ -31,7 +31,7 @@ export function SettingsView() {
         {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{l}</button>)}
       </div>
       {tab === 'accounts' && <Accounts />}
-      {tab === 'categories' && <Categories />}
+      {tab === 'categories' && <CategoriesSettings />}
       {tab === 'rules' && <Rules />}
       {tab === 'bank' && <BankMapping />}
       {tab === 'periods' && <Periods />}
@@ -132,70 +132,6 @@ function AliasInput({ value, onChange }: { value: string[]; onChange: (v: string
   return <input style={{ width: '100%' }} value={txt} onChange={(ev) => setTxt(ev.target.value)} onBlur={() => onChange(txt.split(',').map((s) => s.trim()).filter(Boolean))} />;
 }
 
-
-// ------------------------------------------------------------------ Kategorier
-
-function Categories() {
-  const data = useStore((s) => s.data);
-  const update = useStore((s) => s.update);
-  const e = useEngine();
-  const usage = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of e.resolved.values()) for (const l of r.lines) if (l.categoryId) m.set(l.categoryId, (m.get(l.categoryId) ?? 0) + 1);
-    return m;
-  }, [e]);
-  const set = (id: string, patch: Partial<Category>) => update((d) => ({ ...d, categories: d.categories.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
-  const add = (kind: Category['kind'], parentId?: string) => {
-    const name = prompt(parentId ? 'Navn på underkategori' : 'Navn på kategori');
-    if (!name?.trim()) return;
-    const id = newCategoryId(data.categories, kind, name.trim(), parentId);
-    update((d) => ({ ...d, categories: [...d.categories, { id, name: name.trim(), kind, parentId }] }));
-  };
-  const remove = (c: Category) => {
-    const ids = descendants(data.categories, c.id);
-    const n = ids.reduce((s, id) => s + (usage.get(id) ?? 0), 0);
-    const subs = ids.length - 1;
-    if ((n || subs) && !confirm(`"${c.name}"${subs ? ` har ${subs} underkategori${subs > 1 ? 'er' : ''}, der også slettes` : ''}${n ? `${subs ? ', og' : ''} bruges ${n} steder` : ''}. Slet alligevel?${n ? ' Beløbene vises som "Slettet kategori", indtil du flytter dem.' : ''}`)) return;
-    update((d) => ({ ...d, categories: d.categories.filter((x) => !ids.includes(x.id)) }));
-  };
-  /** Én kategori med dens underkategorier – i vilkårlig dybde. */
-  const node = (c: Category, depth: number): React.ReactNode => (
-    <div key={c.id} className={depth ? 'cat-sub' : 'cat-top'}>
-      <div className="row cat-line">
-        <input className={`grow ${depth ? 'sm' : ''}`} value={c.name} onChange={(ev) => set(c.id, { name: ev.target.value })} style={depth ? undefined : { fontWeight: 600 }} aria-label={`Navn på ${c.name}`} />
-        <span className="small muted" title="Antal transaktionslinjer med kategorien">{usage.get(c.id) ?? 0}</span>
-        <button className="btn sm ghost" title={`Ny underkategori under ${c.name}`} onClick={() => add(c.kind, c.id)}>+ Under</button>
-        <button className="btn sm ghost danger" onClick={() => remove(c)} aria-label={`Slet ${c.name}`}>✕</button>
-      </div>
-      {childrenOf(data.categories, c.id).map((k) => node(k, depth + 1))}
-    </div>
-  );
-  if (!data.categories.length) {
-    return (
-      <div className="card msg">
-        <h2>Ingen kategorier endnu</h2>
-        <p className="ink2" style={{ margin: '8px 0 12px' }}>Start med et eksempeltræ og ret det til – eller byg dit eget fra bunden.</p>
-        <div className="row">
-          <button className="btn primary" onClick={() => update((d) => ({ ...d, categories: defaultCategories() }))}>Indsæt eksempeltræ</button>
-          <button className="btn" onClick={() => add('expense')}>+ Udgiftskategori</button>
-          <button className="btn" onClick={() => add('income')}>+ Indtægtskategori</button>
-          <button className="btn" onClick={() => add('both')}>+ Kategori der går begge veje</button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="grid3">
-      {(['income', 'both', 'expense'] as const).map((kind) => (
-        <div key={kind} className="card">
-          <div className="card-head"><h2 className="grow">{kind === 'income' ? 'Indtægter' : kind === 'expense' ? 'Udgifter' : KIND_NAME.both}</h2><button className="btn sm" onClick={() => add(kind)}>+ Kategori</button></div>
-          {kind === 'both' && <InfoBox label="Hvad er begge veje?">Fx renter eller afkast: et positivt beløb er en indtægt, et negativt en udgift.</InfoBox>}
-          {data.categories.filter((c) => c.kind === kind && !c.parentId).map((top) => node(top, 0))}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // ------------------------------------------------------------------ Regler
 
