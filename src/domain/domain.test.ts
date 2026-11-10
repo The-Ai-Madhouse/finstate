@@ -992,3 +992,26 @@ describe('afklar resten: afskriv eller tag med til næste periode', () => {
     expect(periodChecks(buildEngine(d), y25()).find((c) => c.id === 'settle-acc-jonas')?.level).toBe('ok');
   });
 });
+
+describe('tag stilling til en post: afskriv eller lad stå', () => {
+  it('lets the remaining stand as an asset, or writes all of it off', async () => {
+    const { settleState, withSettle, settleRemaining, undoStand } = await import('./settle');
+    const d0 = demoData();
+    const buy = d0.txs.find((t) => t.text.includes('Restaurant Havnehuset') && t.date === '2025-10-14')!;
+    let d = { ...d0, txs: d0.txs.map((t) => (t.id === buy.id ? { ...t, manual: { type: 'internal' as const, targetAccountId: 'acc-jonas' } } : t)) };
+    d = withSettle(d, 'p-2025', 'acc-jonas', true);
+    const st = () => settleState(d, buildEngine(d).ledger, 'acc-jonas', d.periods[0]);
+    expect(st().done).toBe(false);
+    // Lad stå: alt afklaret, og beløbet (primo 200 − 200 + 1.200) står som aktiv
+    const stood = settleRemaining(d, buildEngine(d).ledger, 'acc-jonas', d.periods[0], { stand: true });
+    const s1 = settleState(stood, buildEngine(stood).ledger, 'acc-jonas', stood.periods[0]);
+    expect([s1.done, s1.carriedSum]).toEqual([true, 120000]);
+    const back = undoStand(stood, buildEngine(stood).ledger, 'acc-jonas', stood.periods[0]);
+    expect(settleState(back, buildEngine(back).ledger, 'acc-jonas', back.periods[0]).done).toBe(false);
+    // Afskriv: alt afklaret, og posten står i 0
+    d = settleRemaining(d, buildEngine(d).ledger, 'acc-jonas', d.periods[0], { writeOff: 'ex-gaver-givet' });
+    const s2 = st();
+    expect([s2.done, s2.carriedSum]).toEqual([true, 0]);
+    expect(buildEngine(d).statement(d.periods[0]).rows.find((r) => r.ref === 'acc:acc-jonas')?.close ?? 0).toBe(0);
+  });
+});

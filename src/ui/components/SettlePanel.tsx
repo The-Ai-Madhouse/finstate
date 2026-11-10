@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
-import { isSettled, pairItems, settleState, unpair, withCarry, withSettle, writeOffDifference, writeOffItem, type SettleItem } from '../../domain/settle';
+import { isSettled, pairItems, settleRemaining, settleState, undoStand, unpair, withCarry, withSettle, writeOffDifference, writeOffItem, type SettleItem } from '../../domain/settle';
 import { linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
@@ -52,16 +52,11 @@ export function SettlePanel({ acc }: { acc: Account }) {
           Kun {period ? period.name : 'periodens'} bevægelser vises; alt fra før perioden står samlet som "Saldo primo" og kan parres med periodens bevægelser.</InfoBox>
         <span className="spacer" />
         {st.done
-          ? <span className="chip user" title="Alt er parret og går op, afskrevet – eller taget med til næste periode">✓ Afstemt</span>
-          : <span className="chip review">{st.pending.length + st.bad.length} uafklarede</span>}
+          ? <span className="chip user" title="Alt er parret og går op, afskrevet – eller står som aktiv/passiv">✓ Afstemt</span>
+          : <span className="chip review">{st.pending.length + st.bad.length} {st.pending.length + st.bad.length === 1 ? 'uafklaret' : 'uafklarede'}</span>}
         <span className="chip">{done.length} udlignet</span>
-        {st.carriedSum !== 0 && <span className="chip" title={`Bliver stående på posten og indgår i saldo primo i ${next}`}>→ {next}: <Money v={st.carriedSum} decimals signed /></span>}
+        {st.carriedSum !== 0 && <span className="chip" title={`Står på balancen og indgår i saldo primo i ${next}`}>Står som {st.carriedSum > 0 ? 'aktiv' : 'passiv'}: <Money v={Math.abs(st.carriedSum)} decimals /></span>}
       </div>
-      {!st.done && (
-        <p className="small ink2" style={{ margin: '0 0 6px' }}>
-          Par det, der hører sammen. Det, der er tilbage, kan du <b>afskrive</b> (som udgift/indtægt nu) eller <b>tage med til {next}</b> – så bliver beløbet stående på posten og kan parres dér.
-        </p>
-      )}
 
       {st.suggestions.length > 0 && (
         <div className="settle-suggest">
@@ -87,10 +82,10 @@ export function SettlePanel({ acc }: { acc: Account }) {
           <table className="small">
             <tbody>{st.open.map((i) => itemRow(i, <input type="checkbox" checked={sel.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Vælg ${i.text}`} />,
               i.carried
-                ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}><span className="chip" title={`Bliver stående på posten og indgår i saldo primo i ${next}`}>→ {next}</span><button className="btn sm ghost" onClick={() => carry(i.key, false)}>Fortryd</button></span>
+                ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}><span className="chip" title={`Du har taget stilling: den står på posten og indgår i saldo primo i ${next}`}>Står</span><button className="btn sm ghost" onClick={() => carry(i.key, false)}>Fortryd</button></span>
                 : <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
                     <WriteOff label="Afskriv…" sum={-i.amount} onPick={(c) => writeOffOne(i.key, c)} />
-                    <button className="btn sm ghost" title={`Acceptér, at den ikke er afklaret endnu – beløbet bliver stående på posten og tages med til ${next}`} onClick={() => carry(i.key, true)}>Tag med til {next}</button>
+                    <button className="btn sm ghost" title={`Den går ikke op – lad beløbet stå på balancen som ${i.amount > 0 ? 'aktiv' : 'passiv'}`} onClick={() => carry(i.key, true)}>Lad stå</button>
                   </span>))}</tbody>
           </table>
           <div className="row small" style={{ marginTop: 4 }}>
@@ -120,14 +115,14 @@ export function SettlePanel({ acc }: { acc: Account }) {
           <div className="row small" style={{ marginTop: 4 }}>
             {g.sum === 0 ? <span className="chip user">✓ Udlignet</span> : g.carried ? (
               <>
-                <span className="chip" title={`Resten bliver stående på posten og indgår i saldo primo i ${next}`}>{g.sum > 0 ? `Mangler ${kr(g.sum)}` : `${kr(-g.sum)} for meget`} → {next}</span>
+                <span className="chip" title={`Står på balancen og indgår i saldo primo i ${next}`}>Står som {g.sum > 0 ? 'aktiv' : 'passiv'} · {kr(Math.abs(g.sum))}</span>
                 <button className="btn sm ghost" onClick={() => carry(`match:${g.match.id}`, false)}>Fortryd</button>
               </>
             ) : (
               <>
                 <span className="chip review">{g.sum > 0 ? `Mangler ${kr(g.sum)}` : `${kr(-g.sum)} for meget`}</span>
-                <WriteOff onPick={(categoryId) => update((d) => writeOffDifference(d, e.ledger, g.match.id, categoryId, period))} sum={g.sum} />
-                <button className="btn sm ghost" title={`Acceptér, at det ikke går op endnu – resten bliver stående på posten og tages med til ${next}`} onClick={() => carry(`match:${g.match.id}`, true)}>Tag med til {next}</button>
+                <WriteOff label="Afskriv…" onPick={(categoryId) => update((d) => writeOffDifference(d, e.ledger, g.match.id, categoryId, period))} sum={g.sum} />
+                <button className="btn sm ghost" title={`Den går ikke op – lad forskellen stå på balancen som ${g.sum > 0 ? 'aktiv' : 'passiv'}`} onClick={() => carry(`match:${g.match.id}`, true)}>Lad stå</button>
               </>
             )}
             <span className="spacer" />
@@ -168,6 +163,7 @@ export function SettleOverview() {
   const focus = useStore((s) => s.transferFocus);
   const [openId, setOpenId] = useState<string>();
   const [adding, setAdding] = useState(false);
+  const update = useStore((s) => s.update);
   const ref = useRef<HTMLDivElement>(null);
   const tracked = e.data.accounts.filter((a) => a.kind === 'tracked');
   // Valget gælder kun denne periode – en post kan afstemmes i ét år og ikke i et andet.
@@ -195,34 +191,35 @@ export function SettleOverview() {
         ) : <button className="btn sm" onClick={() => { setAdding(true); setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Tilføj post til afstemning"]')?.focus(), 0); }}>+ Tilføj post</button>)}
       </div>
       <InfoBox label="Hvad kan afstemmes?">
-        Her samles det, du har valgt at afstemme: <b>poster</b>, der følger dine overførsler (fx "Jonas skylder mig"), hvor du parrer et udlæg med tilbagebetalingen –
-        og <b>parrede transaktioner</b>, som du har parret i Kategorisér (fx et udlæg og indbetalingen). Du ser med det samme, om det går op;
-        gør det ikke, vælger du, hvor resten hører hjemme.
+        Vælg de poster, du vil afstemme (fx "Jonas skylder mig"). Går en post ikke op, tager du stilling: <b>Afskriv</b> resten som udgift/indtægt –
+        eller <b>Lad stå</b>, så beløbet står på balancen som aktiv/passiv. Fold en post ud for at parre de enkelte bevægelser.
       </InfoBox>
 
       <div className="section-label">Poster</div>
       {!posts.length ? (
         <div className="small muted">Ingen poster valgt i {period?.name ?? 'perioden'}. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig" – valget gælder kun dette financial statement.</div>
       ) : (
-        <table>
-          <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Status</th><th className="num">Til næste periode</th><th /></tr></thead>
+        <table className="settle-posts">
+          <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Status</th><th /></tr></thead>
           <tbody>
             {posts.map((a) => {
               const st = settleState(e.data, e.ledger, a.id, period);
               const bal = st.items.reduce((s, i) => s + i.amount, 0);
+              const left = st.pending.reduce((s, i) => s + i.amount, 0) + st.bad.reduce((s, g) => s + g.sum, 0);
+              const isOpen = openId === a.id;
               return [
-                <tr key={a.id} className={`click ${openId === a.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpenId(openId === a.id ? undefined : a.id); }}>
-                  <td><span className={`caret ${openId === a.id ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
+                <tr key={a.id} className={`click ${isOpen ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,input,.combo')) setOpenId(isOpen ? undefined : a.id); }}>
+                  <td><span className={`caret ${isOpen ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
                   <td className="num"><Money v={bal} decimals /></td>
-                  <td>{st.done ? <span className="chip user">✓ Afstemt</span> : <span className="chip review">{st.pending.length + st.bad.length} uafklarede</span>}</td>
-                  <td className="num">{st.carriedSum ? <Money v={st.carriedSum} decimals signed /> : <span className="muted small">–</span>}</td>
-                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn sm ghost" onClick={() => setOpenId(openId === a.id ? undefined : a.id)}>{openId === a.id ? 'Luk' : 'Afstem'}</button>
+                  <td><PostStatus st={st} left={left} /></td>
+                  <td className="num settle-actions">
+                    {period && !st.done && <PostDecision accountId={a.id} left={left} />}
+                    {period && st.done && st.carriedSum !== 0 && <button className="btn sm ghost" title="Fortryd – så er den uafklaret igen" onClick={() => update((d) => undoStand(d, e.ledger, a.id, period))}>Fortryd</button>}
                     <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id)}>Post →</button>
-                    <button className="btn sm ghost" title={`Fjern fra afstemningen i ${period?.name ?? 'perioden'} (dine parringer bevares)`} aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { if (period) setPostSettle(period.id, a.id, false); if (openId === a.id) setOpenId(undefined); }}>✕</button>
+                    <button className="btn sm ghost" title={`Fjern fra afstemningen i ${period?.name ?? 'perioden'} (dine parringer bevares)`} aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { if (period) setPostSettle(period.id, a.id, false); if (isOpen) setOpenId(undefined); }}>✕</button>
                   </td>
                 </tr>,
-                openId === a.id && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={5}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
+                isOpen && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={4}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
               ];
             })}
           </tbody>
@@ -297,3 +294,35 @@ export function SettleToggle({ acc }: { acc: Account }) {
 
 /** "2025" → "2026"; ellers "næste periode". */
 export const nextYearName = (name: string) => (/^\d{4}$/.test(name.trim()) ? String(Number(name.trim()) + 1) : 'næste periode');
+
+/** Status for en post: afstemt, står som aktiv/passiv (taget stilling til) – eller hvor meget der er uafklaret. */
+function PostStatus({ st, left }: { st: ReturnType<typeof settleState>; left: number }) {
+  if (st.done && st.carriedSum === 0) return <span className="chip user">✓ Afstemt</span>;
+  if (st.done) return <span className="chip" title="Du har taget stilling: den går ikke op, og beløbet står på balancen">Står som {st.carriedSum > 0 ? 'aktiv' : 'passiv'} · {kr(Math.abs(st.carriedSum))}</span>;
+  const n = st.pending.length + st.bad.length;
+  return <span className="chip review">{n} {n === 1 ? 'uafklaret' : 'uafklarede'} · {kr(Math.abs(left))}</span>;
+}
+
+/** Tag stilling til det uafklarede på posten: afskriv det – eller lad det stå som aktiv/passiv. */
+function PostDecision({ accountId, left }: { accountId: string; left: number }) {
+  const e = useEngine();
+  const period = usePeriod();
+  const update = useStore((s) => s.update);
+  const [writing, setWriting] = useState(false);
+  if (!period) return null;
+  if (writing) {
+    return (
+      <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+        <CategoryCombo className="sm" primaryKind={left > 0 ? 'expense' : 'income'} placeholder={`afskriv ${kr(Math.abs(left))} som …`}
+          onChange={(c) => { if (c) { update((d) => settleRemaining(d, e.ledger, accountId, period, { writeOff: c })); setWriting(false); } }} />
+        <button className="btn sm ghost" onClick={() => setWriting(false)} aria-label="Annullér">✕</button>
+      </span>
+    );
+  }
+  return (
+    <>
+      <button className="btn sm" title="Bogfør det uafklarede som udgift/indtægt" onClick={() => setWriting(true)}>Afskriv…</button>
+      <button className="btn sm" title={`Den går ikke op – lad beløbet stå på balancen som ${left > 0 ? 'aktiv' : 'passiv'}`} onClick={() => update((d) => settleRemaining(d, e.ledger, accountId, period, { stand: true }))}>Lad stå</button>
+    </>
+  );
+}

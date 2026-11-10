@@ -708,3 +708,5 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 tr.settle-carried td { color: var(--ink-2); }
 .pair-kind { align-self: flex-start; }
 .pair-kind button { padding: 6px 12px; font-size: 13px; }
+.settle-posts td.settle-actions { white-space: nowrap; }
+.settle-posts td.settle-actions .btn { margin-left: 4px; }

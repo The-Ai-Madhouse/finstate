@@ -259,3 +259,34 @@ export function writeOffDifference(d: AppData, ledger: Ledger, matchId: string, 
     matches: d.matches.map((x) => (x.id === matchId ? { ...x, keys: [...x.keys, `oi:${id}`] } : x)),
   };
 }
+
+/** Sæt/fjern "lad stå" for flere bevægelser/grupper på én gang. */
+export function withCarryMany(d: AppData, periodId: string, keys: string[], on: boolean): AppData {
+  return keys.reduce((x, k) => withCarry(x, periodId, k, on), d);
+}
+
+/**
+ * Tag stilling til alt det uafklarede på en post i perioden på én gang:
+ *  · stand: lad det stå – posten går ikke op, og beløbet står som aktiv/passiv (og indgår i næste periodes saldo primo)
+ *  · writeOff: afskriv det som udgift/indtægt (grupper, der ikke går op, og bevægelser, der ikke er parret)
+ */
+export function settleRemaining(d: AppData, ledger: Ledger, accountId: string, period: Period, how: { stand: true } | { writeOff: string }): AppData {
+  const st = settleState(d, ledger, accountId, period);
+  if ('stand' in how) return withCarryMany(d, period.id, [...st.pending.map((i) => i.key), ...st.bad.map((g) => `match:${g.match.id}`)], true);
+  let n = d;
+  for (const g of st.bad) n = writeOffDifference(n, ledger, g.match.id, how.writeOff, period);
+  if (st.pending.length === 1) n = writeOffItem(n, ledger, accountId, st.pending[0].key, how.writeOff, period);
+  else if (st.pending.length > 1) {
+    // Saml de uparrede i én gruppe og afskriv forskellen (går de op, er der intet at afskrive).
+    n = pairItems(n, accountId, st.pending.map((i) => i.key));
+    const m = n.matches.find((x) => x.accountId === accountId && x.keys.includes(st.pending[0].key));
+    if (m) n = writeOffDifference(n, ledger, m.id, how.writeOff, period);
+  }
+  return n;
+}
+
+/** Fortryd "lad stå" for alt på posten i perioden. */
+export function undoStand(d: AppData, ledger: Ledger, accountId: string, period: Period): AppData {
+  const st = settleState(d, ledger, accountId, period);
+  return withCarryMany(d, period.id, [...st.open.filter((i) => i.carried).map((i) => i.key), ...st.groups.filter((g) => g.carried).map((g) => `match:${g.match.id}`)], false);
+}

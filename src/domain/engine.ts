@@ -128,8 +128,8 @@ export function periodChecks(e: Engine, p: Period): Check[] {
   for (const a of data.accounts.filter((x) => isSettled(p, x))) {
     const ss = settleState(data, ledger, a.id, p);
     const n = ss.pending.length + ss.bad.length;
-    if (n) out.push({ id: `settle-${a.id}`, level: 'warn', title: `${a.name}: ${n} uafklarede i afstemningen`, detail: 'Par det, der hører sammen – og afskriv resten eller tag det med til næste periode.', view: 'transfers' });
-    else if (ss.items.length) out.push({ id: `settle-${a.id}`, level: 'ok', title: `${a.name}: afstemt${ss.carriedSum ? ` – ${kr(Math.abs(ss.carriedSum))} tages med til næste periode` : ''}` });
+    if (n) out.push({ id: `settle-${a.id}`, level: 'warn', title: `${a.name}: ${n} ${n === 1 ? 'uafklaret' : 'uafklarede'} i afstemningen`, detail: 'Afskriv det, der ikke går op – eller lad det stå som aktiv/passiv.', view: 'transfers' });
+    else if (ss.items.length) out.push({ id: `settle-${a.id}`, level: 'ok', title: `${a.name}: afstemt${ss.carriedSum ? ` – ${kr(Math.abs(ss.carriedSum))} står som ${ss.carriedSum > 0 ? 'aktiv' : 'passiv'}` : ''}` });
   }
 
   // 5. Værdier
