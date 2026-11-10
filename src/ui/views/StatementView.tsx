@@ -298,12 +298,12 @@ function BalanceColumns({ s }: { s: Statement }) {
                     <tr key={r.ref} className="sub">
                       <td>{r.label}{noteOf(r) && <div className="small muted">{noteOf(r)}</div>}</td>
                       <td className="num"><Money precise v={r.close * sign} /></td>
-                      <td className="num ink2"><Money precise v={(r.close - r.open) * sign} signed />{r.kind === 'valuation' && <ResultParts parts={valuationResultInPeriod(e.data, e.ledger, s.period, r.ref.slice(4))} categories={e.data.categories} />}</td>
+                      <td className="num ink2"><Money precise v={(r.close - r.open) * sign} signed colored inverted={sd === 'liability'} />{r.kind === 'valuation' && <ResultParts parts={valuationResultInPeriod(e.data, e.ledger, s.period, r.ref.slice(4))} categories={e.data.categories} />}</td>
                     </tr>
                   )),
                 ])}
                 {!rows.length && <tr><td colSpan={3} className="muted">Ingen</td></tr>}
-                <tr className="sum"><td>{sd === 'asset' ? 'Aktiver' : 'Passiver'} i alt</td><td className="num"><Money precise v={total} /></td><td className="num"><Money precise v={total - totalOpen} signed /></td></tr>
+                <tr className="sum"><td>{sd === 'asset' ? 'Aktiver' : 'Passiver'} i alt</td><td className="num"><Money precise v={total} /></td><td className="num"><Money precise v={total - totalOpen} signed colored inverted={sd === 'liability'} /></td></tr>
               </tbody>
             </table>
           </div>

@@ -14,12 +14,14 @@ import { uid } from '../../domain/util';
  * Beløb. decimals: "1.234,56" (tabeller med transaktioner). precise: "1.234,56 kr" (saldi i balancen).
  * Ellers hele kroner: "1.235 kr".
  */
-export function Money({ v, decimals, precise, signed, colored }: { v: number; decimals?: boolean; precise?: boolean; signed?: boolean; colored?: boolean }) {
+/** colored: + grøn, − rød. inverted: omvendt (fx passiver, hvor mere gæld er dårligt). */
+export function Money({ v, decimals, precise, signed, colored, inverted }: { v: number; decimals?: boolean; precise?: boolean; signed?: boolean; colored?: boolean; inverted?: boolean }) {
   const txt = precise ? `${kr2f(signed ? Math.abs(v) : v)} kr` : decimals ? kr2f(signed ? Math.abs(v) : v) : kr(signed ? Math.abs(v) : v);
   // Fortegn og farve ud fra det viste (afrundede) beløb – ellers "−0 kr".
   const shown = decimals || precise ? v : Math.round(v / 100) * 100;
   const sign = signed ? (shown > 0 ? '+' : shown < 0 ? '−' : '') : '';
-  return <span className={`num ${colored ? (shown > 0 ? 'pos' : shown < 0 ? 'neg' : '') : ''}`}>{sign}{txt}</span>;
+  const good = inverted ? shown < 0 : shown > 0;
+  return <span className={`num ${colored && shown ? (good ? 'pos' : 'neg') : ''}`}>{sign}{txt}</span>;
 }
 
 /** Indtægt og udgift er ét valg – hvilken det er, følger af beløbets fortegn (og kategorien). */

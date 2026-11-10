@@ -29,10 +29,10 @@ type SrcReq = { ref: string; label: string; side: 'asset' | 'liability'; view: '
 type ShowSources = (s: SrcReq) => void;
 
 /** Klikbart beløb i balancen → "Hvad består posten af?" */
-function SrcAmount({ v, signed, colored, onOpen }: { v: number; signed?: boolean; colored?: boolean; onOpen: () => void }) {
+function SrcAmount({ v, signed, colored, inverted, onOpen }: { v: number; signed?: boolean; colored?: boolean; inverted?: boolean; onOpen: () => void }) {
   return (
     <button className="amount-link" title="Se hvad beløbet består af" onClick={(ev) => { ev.stopPropagation(); onOpen(); }}>
-      <Money precise v={v} signed={signed} colored={colored} />
+      <Money precise v={v} signed={signed} colored={colored} inverted={inverted} />
     </button>
   );
 }
@@ -85,7 +85,7 @@ function BalanceSheet({ period }: { period: Period }) {
                   <td><span className="chip">{r.kind === 'cp' ? (r.side === 'asset' ? 'Tilgodehavende · udlæg' : 'Gæld · udlæg') : 'Penge undervejs'}</span></td>
                   <td className="num"><SrcAmount v={r.open * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'primo' })} /></td>
                   <td className="num"><SrcAmount v={r.close * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
-                  <td className="num ink2"><SrcAmount v={(r.close - r.open) * sign(sd)} signed onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
+                  <td className="num ink2"><SrcAmount v={(r.close - r.open) * sign(sd)} signed colored inverted={sd === 'liability'} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
                   <td className="num"><button className="btn sm ghost" onClick={() => setView('transfers')}>{r.kind === 'cp' ? 'Se udlæg →' : 'Se overførsler →'}</button></td>
                 </tr>
               ))}
@@ -94,7 +94,7 @@ function BalanceSheet({ period }: { period: Period }) {
                 <td colSpan={2}>{SIDE_LABEL[sd]} i alt</td>
                 <td className="num"><Money precise v={total[0]} /></td>
                 <td className="num"><Money precise v={total[1]} /></td>
-                <td className="num"><Money precise v={total[1] - total[0]} signed /></td>
+                <td className="num"><Money precise v={total[1] - total[0]} signed colored inverted={sd === 'liability'} /></td>
                 <td />
               </tr>
               <tr className="bs-gap"><td colSpan={6} /></tr>
@@ -180,7 +180,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
             <td className="num"><SrcAmount v={row.close * sign} onOpen={() => openSources()} />{acc.kind === 'bank' && !hasTx && <div className="small neg">ingen import</div>}</td>
           </>
         )}
-        <td className="num ink2"><SrcAmount v={(row.close - row.open) * sign} signed onOpen={() => openSources()} />{manual && <ResultParts parts={valuationResultInPeriod(e.data, e.ledger, period, acc.id)} categories={e.data.categories} />}</td>
+        <td className="num ink2"><SrcAmount v={(row.close - row.open) * sign} signed colored inverted={row.side === 'liability'} onOpen={() => openSources()} />{manual && <ResultParts parts={valuationResultInPeriod(e.data, e.ledger, period, acc.id)} categories={e.data.categories} />}</td>
         <td className="num"><button className="btn sm ghost" onClick={onToggle}>{expanded ? 'Luk' : 'Detaljer'}</button></td>
       </tr>
       {expanded && (
