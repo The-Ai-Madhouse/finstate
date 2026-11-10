@@ -116,25 +116,79 @@ export function suggestPairs(open: SettleItem[]): [SettleItem, SettleItem][] {
   return out;
 }
 
+/** En afskrevet difference: en åben post med kategori, som hører til en gruppe. */
+const isWriteOff = (d: Pick<AppData, 'openItems'>, k: string) => k.startsWith('oi:') && !!d.openItems.find((o) => o.id === k.slice(3))?.categoryId;
+
+/**
+ * Ryd op efter en ændring: grupper med færre end to rigtige bevægelser opløses (en afskrivning tæller ikke),
+ * og afskrivninger, der ikke længere hører til en gruppe, slettes – så de ikke bliver stående som et beløb.
+ */
+function tidy(d: AppData, matches: Match[], dropOi: Set<string>): AppData {
+  const keep: Match[] = [];
+  for (const m of matches) {
+    const real = m.keys.filter((k) => !isWriteOff(d, k));
+    if (real.length < 2) { for (const k of m.keys) if (isWriteOff(d, k)) dropOi.add(k.slice(3)); continue; }
+    keep.push(m);
+  }
+  const referenced = new Set(keep.flatMap((m) => m.keys));
+  for (const k of [...dropOi]) if (referenced.has(`oi:${k}`)) dropOi.delete(k);
+  return {
+    ...d,
+    matches: keep.map((m) => ({ ...m, keys: m.keys.filter((k) => !(k.startsWith('oi:') && dropOi.has(k.slice(3)))) })),
+    openItems: dropOi.size ? d.openItems.filter((o) => !dropOi.has(o.id)) : d.openItems,
+  };
+}
+
+/**
+ * Tag bevægelser ud af deres grupper. Ændres en gruppe, passer en afskrevet difference ikke længere – den slettes.
+ * Står der færre end to tilbage, opløses gruppen (med dens afskrivninger).
+ */
+export function removeFromMatches(d: AppData, keys: string[]): AppData {
+  const ks = new Set(keys);
+  const dropOi = new Set<string>();
+  const matches = (d.matches ?? []).map((m) => {
+    if (!m.keys.some((k) => ks.has(k))) return m;
+    for (const k of m.keys) if (isWriteOff(d, k)) dropOi.add(k.slice(3));
+    return { ...m, keys: m.keys.filter((k) => !ks.has(k) && !isWriteOff(d, k)) };
+  });
+  return tidy(d, matches, dropOi);
+}
+
 /** Par bevægelser i en ny gruppe (eller føj dem til en eksisterende). Nøglerne fjernes fra andre grupper. */
 export function pairItems(d: AppData, accountId: string, keys: string[], intoMatchId?: string): AppData {
-  const ks = new Set(keys);
-  let matches = (d.matches ?? []).map((m) => (m.accountId === accountId ? { ...m, keys: m.keys.filter((k) => !ks.has(k)) } : m));
+  let n = removeFromMatches(d, keys);
+  let matches = n.matches ?? [];
+  const dropOi = new Set<string>();
   if (intoMatchId && matches.some((m) => m.id === intoMatchId)) {
-    matches = matches.map((m) => (m.id === intoMatchId ? { ...m, keys: [...m.keys, ...keys] } : m));
+    // Gruppen ændres → en tidligere afskrivning passer ikke længere.
+    matches = matches.map((m) => {
+      if (m.id !== intoMatchId) return m;
+      for (const k of m.keys) if (isWriteOff(n, k)) dropOi.add(k.slice(3));
+      return { ...m, keys: [...m.keys.filter((k) => !isWriteOff(n, k)), ...keys] };
+    });
   } else {
     matches = [...matches, { id: uid('match'), accountId, keys: [...keys] }];
   }
-  // Ingen parring alene: grupper, der kun har én tilbage, opløses.
-  return { ...d, matches: matches.filter((m) => m.keys.length > 1) };
+  n = tidy(n, matches, dropOi);
+  return n;
 }
 
+/** Opløs en gruppe – eller tag én bevægelse ud af den. Afskrivninger i gruppen slettes med. */
 export function unpair(d: AppData, matchId: string, key?: string): AppData {
-  const matches = (d.matches ?? [])
-    .map((m) => (m.id !== matchId ? m : key ? { ...m, keys: m.keys.filter((k) => k !== key) } : { ...m, keys: [] }))
-    // Står der kun én tilbage, er den ikke længere parret med noget – gruppen opløses.
-    .filter((m) => m.keys.length > 1);
-  return { ...d, matches };
+  if (key) return removeFromMatches(d, [key]);
+  const m = (d.matches ?? []).find((x) => x.id === matchId);
+  if (!m) return d;
+  const dropOi = new Set(m.keys.filter((k) => isWriteOff(d, k)).map((k) => k.slice(3)));
+  return tidy(d, (d.matches ?? []).filter((x) => x.id !== matchId), dropOi);
+}
+
+/** Ved indlæsning: afskrivninger, som ikke længere hører til en gruppe (fx efter en ophævet parring), og grupper med kun én bevægelse. */
+export function tidySettle(d: AppData): AppData {
+  const referenced = new Set((d.matches ?? []).flatMap((m) => m.keys));
+  const stray = d.openItems.filter((o) => o.categoryId && o.note === 'Afskrevet difference' && !referenced.has(`oi:${o.id}`)).map((o) => o.id);
+  const lonely = (d.matches ?? []).some((m) => m.keys.filter((k) => !isWriteOff(d, k)).length < 2);
+  if (!stray.length && !lonely) return d;
+  return tidy(d, d.matches ?? [], new Set(stray));
 }
 
 /**

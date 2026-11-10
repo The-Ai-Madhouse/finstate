@@ -7,6 +7,7 @@
  * Den er idempotent: uden udlæg i data returneres data uændret.
  */
 import { resolveAll } from './classify';
+import { tidySettle } from './settle';
 import type { Account, AppData, Classification, Period, Split } from './types';
 import { uid } from './util';
 
@@ -101,7 +102,7 @@ const LEGACY_TYPE_LABEL: Record<string, string | undefined> = {
  *    transaktionerne, og reglerne slås fra (de slettes ikke og kan slås til igen i Indstillinger).
  */
 export function migrateModel(input: AppData): AppData {
-  let d = migrateSettle(migratePeriods(input));
+  let d = tidySettle(migrateSettle(migratePeriods(input)));
   if (!d.accountTypes || d.accounts.some((a) => a.subtype !== undefined)) {
     const types: { id: string; name: string }[] = [...(d.accountTypes ?? [])];
     const idOf = (name: string) => {

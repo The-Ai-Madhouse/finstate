@@ -1,4 +1,4 @@
-import { pairItems, withSettle, writeOffDifference } from '../domain/settle';
+import { pairItems, removeFromMatches, withSettle, writeOffDifference } from '../domain/settle';
 import { linkTxs } from '../domain/links';
 import { useMemo } from 'react';
 import { ruleFromTx, splitLines } from '../domain/classify';
@@ -30,11 +30,17 @@ const mapTx = (ids: Set<string>, fn: (t: Tx) => Tx) => (d: AppData): AppData => 
 });
 
 export function setManual(ids: string[], cls: Classification | undefined) {
-  update(mapTx(new Set(ids), (t) => {
-    const n = { ...t, manual: cls };
-    if (cls) delete n.splits;
-    return n;
-  }));
+  update((d) => {
+    const n = mapTx(new Set(ids), (t) => {
+      const x = { ...t, manual: cls };
+      if (cls) delete x.splits;
+      return x;
+    })(d);
+    // Flyttes en parret bevægelse væk fra posten (fx til en udgift), er den ikke længere en del af gruppen.
+    if (!cls) return n;
+    const away = ids.filter((id) => (d.matches ?? []).some((m) => m.keys.includes(`tx:${id}`) && !(cls.type === 'internal' && cls.targetAccountId === m.accountId)));
+    return away.length ? removeFromMatches(n, away.map((id) => `tx:${id}`)) : n;
+  });
 }
 
 /** Par to transaktioner som én intern overførsel (hver peger på den anden konto). */

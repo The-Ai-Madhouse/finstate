@@ -909,3 +909,48 @@ describe('ingen parring alene', () => {
     expect(l.txs.filter((t) => t.link)).toEqual([]);
   });
 });
+
+describe('afskrevet difference følger gruppen', () => {
+  const setup = async () => {
+    const { pairItems, writeOffDifference } = await import('./settle');
+    const d0 = demoData();
+    const buy = d0.txs.find((t) => t.text.includes('Restaurant Havnehuset') && t.date === '2025-04-14')!;
+    const back = d0.txs.find((t) => t.text === 'MobilePay Jonas Lind' && t.date === '2025-04-15')!;
+    let d = { ...d0, txs: d0.txs.map((t) => (t.id === buy.id || t.id === back.id ? { ...t, manual: { type: 'internal' as const, targetAccountId: 'acc-jonas' } } : t)) };
+    d = pairItems(d, 'acc-jonas', [`tx:${buy.id}`, `tx:${back.id}`]);
+    d = writeOffDifference(d, buildEngine(d).ledger, d.matches[0].id, 'ex-gaver-givet', d.periods[0]);
+    return { d, d0, buy, back };
+  };
+  const jonasClose = (d: ReturnType<typeof demoData>) => buildEngine(d).statement(d.periods[0]).rows.find((r) => r.ref === 'acc:acc-jonas')?.close ?? 0;
+
+  it('removes the write-off when the group is dissolved', async () => {
+    const { unpair } = await import('./settle');
+    const { d } = await setup();
+    expect(d.openItems.some((o) => o.note === 'Afskrevet difference')).toBe(true);
+    const n = unpair(d, d.matches[0].id);
+    expect(n.matches).toEqual([]);
+    expect(n.openItems.some((o) => o.note === 'Afskrevet difference')).toBe(false);
+    // Jonas skylder nu de 800 igen – afskrivningen står ikke tilbage som et beløb
+    expect(jonasClose(n)).toBe(80000);
+  });
+
+  it('dissolves the group (with its write-off) when one of two movements is taken out', async () => {
+    const { unpair } = await import('./settle');
+    const { d, buy } = await setup();
+    const n = unpair(d, d.matches[0].id, `tx:${buy.id}`);
+    expect(n.matches).toEqual([]); // den anden står ikke alene med afskrivningen
+    expect(n.openItems.some((o) => o.note === 'Afskrevet difference')).toBe(false);
+  });
+
+  it('also when the movement is reclassified away from the post, and cleans up old leftovers on load', async () => {
+    const { removeFromMatches, tidySettle } = await import('./settle');
+    const { d, back } = await setup();
+    const n = removeFromMatches(d, [`tx:${back.id}`]);
+    expect([n.matches.length, n.openItems.filter((o) => o.note === 'Afskrevet difference').length]).toEqual([0, 0]);
+    // Gamle data: afskrivningen blev stående, efter gruppen var slettet
+    const leftover = { ...d, matches: [] };
+    const cleaned = tidySettle(leftover);
+    expect(cleaned.openItems.some((o) => o.note === 'Afskrevet difference')).toBe(false);
+    expect(tidySettle(cleaned)).toBe(cleaned);
+  });
+});
