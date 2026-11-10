@@ -572,3 +572,7 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 .drawer-sec label.field .amount-wrap { max-width: 220px; }
 .drawer-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 .drawer .settle { border-top: 0; padding-top: 0; }
+
+/* Regnskab: vis hele året eller et halvår */
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+.card.warn-card { border-color: color-mix(in srgb, var(--warning) 60%, var(--line)); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }

@@ -100,7 +100,7 @@ describe('saldokæde', () => {
 describe('demo: hele motoren', () => {
   const data = demoData();
   const e = buildEngine(data);
-  const [h2, h1] = data.periods;
+  const [h2, h1] = data.periods; // 2025 (hele året) og 2026 (i gang)
 
   it('balances every period by construction', () => {
     for (const p of data.periods) {
@@ -145,7 +145,7 @@ describe('demo: hele motoren', () => {
 
   it('writes a narrative', () => {
     const n = narrative(e.statement(h1), e.statement(h2));
-    expect(n.summary).toContain('2026 H1');
+    expect(n.summary).toContain('2026');
     expect(n.progress.length + n.setbacks.length).toBeGreaterThan(0);
   });
 });
@@ -194,7 +194,7 @@ describe('importdækning', () => {
     const later = { id: 'x', name: '2026 H2', start: '2026-07-01', end: '2026-12-31' };
     const cov = importCoverage(d, later, '2027-02-01');
     expect(cov.every((c) => !c.coversEnd && !c.coversStart)).toBe(true);
-    expect(importCoverage(d, h1)[0].coversEnd).toBe(true);
+    expect(importCoverage(d, h1, '2026-07-01')[0].coversEnd).toBe(true); // året er i gang: kun frem til i dag
     // Manglende data kan accepteres pr. periode og konto (fx en lukket konto).
     const ok = importCoverage(d, { ...later, coverageOk: ['acc-loen'] }, '2027-02-01');
     expect(ok.find((c) => c.accountId === 'acc-loen')!.accepted).toBe(true);
@@ -204,8 +204,8 @@ describe('importdækning', () => {
 
 describe('bogføringsstart', () => {
   it('also covers periods started before import', () => {
-    const d = { ...emptyData(), periods: [{ id: 'p', name: '2025 H2', start: '2025-07-01', end: '2025-12-31' }] };
-    expect(withAutoBookStart(d).settings.bookStart).toBe('2025-06-30');
+    const d = { ...emptyData(), periods: [{ id: 'p', name: '2025', start: '2025-01-01', end: '2025-12-31' }] };
+    expect(withAutoBookStart(d).settings.bookStart).toBe('2024-12-31');
   });
 });
 
@@ -367,15 +367,15 @@ describe('posttyper og datamodel v2', () => {
   it('copies posts and notes from the previous period into a new one', async () => {
     const { withNewPeriod } = await import('./accountTypes');
     const d = demoData();
-    const n = withNewPeriod(d, { id: 'p-2026-h2', name: '2026 H2', start: '2026-07-01', end: '2026-12-31' });
-    expect(n.periods.find((p) => p.id === 'p-2026-h2')!.accountIds).toEqual(d.periods[1].accountIds);
-    expect(n.accounts.find((a) => a.id === 'acc-bil')!.notes!['p-2026-h2']).toBe('Fast rente 4,9 %');
+    const n = withNewPeriod(d, { id: 'p-2027', name: '2027', start: '2027-01-01', end: '2027-12-31' });
+    expect(n.periods.find((p) => p.id === 'p-2027')!.accountIds).toEqual(d.periods[1].accountIds);
+    expect(n.accounts.find((a) => a.id === 'acc-bil')!.notes!['p-2027']).toBe('Fast rente 4,9 %');
   });
 
   it('only shows posts in the period\'s list – unless they have a balance', () => {
     const d = demoData();
     const ids = d.periods[1].accountIds!.filter((id) => id !== 'acc-jonas' && id !== 'acc-depot');
-    const d2 = { ...d, periods: d.periods.map((p) => (p.id === 'p-2026-h1' ? { ...p, accountIds: ids } : p)) };
+    const d2 = { ...d, periods: d.periods.map((p) => (p.id === 'p-2026' ? { ...p, accountIds: ids } : p)) };
     const s = buildEngine(d2).statement(d2.periods[1]);
     expect(s.rows.some((r) => r.ref === 'acc:acc-jonas')).toBe(false); // 0 kr – skjult
     expect(s.rows.some((r) => r.ref === 'acc:acc-depot')).toBe(true); // har en saldo – vises stadig
@@ -415,8 +415,8 @@ describe('kategorier der går begge veje', () => {
     const { valuationResultInPeriod } = await import('./ledger');
     const d = demoData();
     const e = buildEngine(d);
-    // Billån: −68.000 → −56.900 med 6 × 2.100 i afdrag ⇒ 1.500 i renter.
-    expect(valuationResultInPeriod(d, e.ledger, d.periods[0], 'acc-bil').get('cat:bo-renter-afkast')).toBe(-150000);
+    // Billån 2025: −79.200 → −56.900 med 12 × 2.100 i afdrag ⇒ 2.900 i renter.
+    expect(valuationResultInPeriod(d, e.ledger, d.periods[0], 'acc-bil').get('cat:bo-renter-afkast')).toBe(-290000);
   });
 });
 
@@ -426,9 +426,9 @@ describe('skift mellem tast selv og følger overførsler', () => {
     const d = demoData();
     const t = switchKind(d, 'acc-depot', 'tracked');
     const start = t.openItems.find((o) => o.accountId === 'acc-depot')!;
-    expect(start.amount).toBe(3100000);
-    expect(start.date).toBe('2025-06-30');
-    expect(buildEngine(t).statement(t.periods[0]).rows.find((r) => r.ref === 'acc:acc-depot')!.open).toBe(3100000);
+    expect(start.amount).toBe(2680000);
+    expect(start.date).toBe('2024-12-31');
+    expect(buildEngine(t).statement(t.periods[0]).rows.find((r) => r.ref === 'acc:acc-depot')!.open).toBe(2680000);
     const back = switchKind(t, 'acc-depot', 'valuation');
     expect(back.openItems.some((o) => o.accountId === 'acc-depot')).toBe(false);
   });
@@ -471,8 +471,8 @@ describe('kilder til et resultatbeløb', () => {
     const src = plSources(d, e.ledger, h2, new Set(['cat:bo-renter-afkast']));
     const dep = src.valuations.find((v) => v.accountId === 'acc-depot')!;
     expect(dep.valueTo - dep.valueFrom - dep.transfers).toBe(dep.amount);
-    // Afkast = 35.650 − 31.000 − 2 × 1.500 overførsler = 1.650
-    expect(valuationResultInPeriod(d, e.ledger, h2, 'acc-depot').get('cat:bo-renter-afkast')).toBe(165000);
+    // Afkast 2025 = 35.650 − 26.800 − 4 × 1.500 overførsler = 2.850
+    expect(valuationResultInPeriod(d, e.ledger, h2, 'acc-depot').get('cat:bo-renter-afkast')).toBe(285000);
     const groceries = plSources(d, e.ledger, h2, new Set(['cat:ex-dagligvarer']));
     expect(groceries.tx.length).toBeGreaterThan(0);
     expect(-groceries.total).toBe(e.statement(h2).expense.find((c) => c.id === 'ex-dagligvarer')!.amount);
@@ -578,7 +578,7 @@ describe('importerede filer', () => {
     const { importFiles, removeImport } = await import('./imports');
     const d = demoData();
     const files = importFiles(d);
-    expect(files.map((f) => f.fileName).sort()).toEqual(['lonkonto-2025-07_2026-06.csv', 'opsparing-2025-07_2026-06.csv']);
+    expect(files.map((f) => f.fileName).sort()).toEqual(['lonkonto-2025-01_2026-06.csv', 'opsparing-2025-01_2026-06.csv']);
     const loen = files.find((f) => f.accountId === 'acc-loen')!;
     // En anden fil med overlap: de første 10 transaktioner
     const overlap = { id: 'imp-x', fileName: 'overlap.csv', accountId: 'acc-loen', importedAt: '2026-08-01T00:00:00Z', txIds: loen.txs.slice(0, 10).map((t) => t.id) };
@@ -588,5 +588,59 @@ describe('importerede filer', () => {
     expect(after.imports.map((r) => r.id)).not.toContain(loen.id);
     // Ældre data uden filregistrering vises som "Tidligere import"
     expect(importFiles({ ...d, imports: [] }).every((f) => f.legacy)).toBe(true);
+  });
+});
+
+describe('årlige financial statements', () => {
+  it('shows a half year as a slice of the year – same bookkeeping, and the halves add up', async () => {
+    const { scoped, compareFor, compareOptions, elapsedEnd, scopeAvailable } = await import('./periods');
+    const d = demoData();
+    const e = buildEngine(d);
+    const [y25, y26] = d.periods;
+    const h1 = scoped(y25, 'h1');
+    const h2 = scoped(y25, 'h2');
+    expect([h1.start, h1.end, h2.start, h2.end]).toEqual(['2025-01-01', '2025-06-30', '2025-07-01', '2025-12-31']);
+    expect(h1.id).toBe(y25.id); // kommentarer og poster følger året
+    const [a, b, year] = [e.statement(h1), e.statement(h2), e.statement(y25)];
+    expect(a.result + b.result).toBe(year.result);
+    expect(a.equityClose).toBe(b.equityOpen);
+    // Depotet har en værdi pr. 30.06, så afkastet fordeles på halvårene.
+    expect(a.rows.find((r) => r.ref === 'acc:acc-depot')!.close).toBe(3100000);
+    // Sammenligning: 2. halvår ↔ 1. halvår · 1. halvår ↔ 2. halvår året før · året ↔ året før.
+    expect(compareFor(d, y25, 'h2')!.end).toBe('2025-06-30');
+    expect([compareFor(d, y26, 'h1')!.start, compareFor(d, y26, 'h1')!.end]).toEqual(['2025-07-01', '2025-12-31']);
+    expect(compareFor(d, y26, 'year')!.id).toBe('p-2025');
+    expect(compareFor({ ...d, periods: d.periods.map((p) => (p.id === 'p-2026' ? { ...p, compareToId: 'p-2025#h1' } : p)) }, { ...y26, compareToId: 'p-2025#h1' }, 'h1')!.end).toBe('2025-06-30');
+    expect(compareOptions(d, y26, 'h1').map((o) => o.id)).toEqual(['p-2026', 'p-2026#h2', 'p-2025', 'p-2025#h1', 'p-2025#h2']);
+    // Et igangværende år: gennemsnit og dækning frem til i dag; 2. halvår først, når det er begyndt.
+    expect(elapsedEnd(y26, '2026-11-10')).toBe('2026-11-10');
+    expect(elapsedEnd(y25, '2026-11-10')).toBe('2025-12-31');
+    expect(scopeAvailable(y26, 'h2', '2026-05-01')).toBe(false);
+  });
+
+  it('merges old half-year statements into years (posts, notes, slides and comparisons follow)', async () => {
+    const { migratePeriods } = await import('./migrate');
+    const base = emptyData();
+    const acc = { id: 'a', name: 'Depot', kind: 'valuation' as const, side: 'asset' as const, aliases: [], notes: { h1: 'gammel', h2: 'ny' } };
+    const d = migratePeriods({
+      ...base,
+      accounts: [acc, { ...acc, id: 'b', notes: { x: 'næste år' } }],
+      periods: [
+        { id: 'h1', name: '2025 H1', start: '2025-01-01', end: '2025-06-30', accountIds: ['a'], coverageOk: ['a'] },
+        { id: 'h2', name: '2025 H2', start: '2025-07-01', end: '2025-12-31', accountIds: ['b'], balanceConfirmed: true },
+        { id: 'x', name: 'Første halvår 2026 H1', start: '2026-01-01', end: '2026-06-30', compareToId: 'h1' },
+      ],
+      slideNotes: { h1: { title: 'Forår' }, x: { title: 'Nu' } },
+    });
+    expect(d.periods.map((p) => [p.id, p.name, p.start, p.end, p.show ?? 'year'])).toEqual([
+      ['h2', '2025', '2025-01-01', '2025-12-31', 'year'],
+      ['x', 'Første halvår 2026', '2026-01-01', '2026-12-31', 'h1'],
+    ]);
+    const y25 = d.periods[0];
+    expect([y25.accountIds, y25.coverageOk, y25.balanceConfirmed]).toEqual([['b', 'a'], ['a'], true]);
+    expect(d.periods[1].compareToId).toBe('h2#h1');
+    expect(d.accounts[0].notes).toEqual({ h2: 'ny' }); // den seneste kommentar vinder
+    expect(d.slideNotes).toEqual({ 'h2#h1': { title: 'Forår' }, 'x#h1': { title: 'Nu' } });
+    expect(migratePeriods(d)).toBe(d);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Fiktive demodata (to halvår) for en opdigtet person, i et generisk bank-CSV-format,
+ * Fiktive demodata (halvandet år: hele 2025 og 1. halvår af 2026) for en opdigtet person, i et generisk bank-CSV-format,
  * så værktøjet kan afprøves uden rigtige bankdata. Alle navne er opdigtede. Genereres deterministisk.
  */
 import { buildTxs, guessMapping, isCompleteMapping, parseCsv } from './csv';
@@ -36,9 +36,9 @@ export function demoData(): AppData {
   const amt = (min: number, max: number) => -Math.round((min + r() * (max - min)) * 100);
   const lon: Row[] = [];
   const ops: Row[] = [];
-  const months = ['2025-07', '2025-08', '2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06'];
+  const months = [...Array(18)].map((_, i) => `${2025 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`);
   months.forEach((m, i) => {
-    const h2 = i < 6;
+    const h2 = i < 12; // 2025: lidt lavere løn og priser end 2026
     lon.push({ date: `${m}-01`, cat: 'Indkomst', sub: 'Løn', text: 'Løn Nordlys Design ApS', amount: (h2 ? 24300 : 25100) * 100 });
     if (i % 3 === 1) lon.push({ date: `${m}-19`, cat: 'Indkomst', sub: 'Øvrig indkomst', text: 'Faktura 10' + i + ' Atelier Krogh', amount: 3800_00 });
     lon.push({ date: `${m}-01`, cat: 'Bolig', sub: 'Husleje', text: 'Husleje Boligforeningen Kastanjen', amount: -8450_00 });
@@ -92,7 +92,7 @@ export function demoData(): AppData {
     ],
     categories: defaultCategories(),
   };
-  data.settings.bookStart = '2025-06-30';
+  data.settings.bookStart = '2024-12-31';
   data.settings.bookStartSet = true;
   data.settings.rulesEnabled = false;
   const imp = (csv: string, accountId: string, fileName: string): Tx[] => {
@@ -104,24 +104,27 @@ export function demoData(): AppData {
     data.imports.push({ id: `imp-${accountId}`, fileName, accountId, importedAt: '2026-07-02T09:00:00.000Z', txIds: txs.map((t) => t.id) });
     return txs;
   };
-  data.txs = [...imp(toCsv(lon, 12400_00), 'acc-loen', 'lonkonto-2025-07_2026-06.csv'), ...imp(toCsv(ops, 52000_00), 'acc-ops', 'opsparing-2025-07_2026-06.csv')];
+  data.txs = [...imp(toCsv(lon, 12400_00), 'acc-loen', 'lonkonto-2025-01_2026-06.csv'), ...imp(toCsv(ops, 52000_00), 'acc-ops', 'opsparing-2025-01_2026-06.csv')];
   // Jonas betaler koncertbilletten tilbage – en intern overførsel fra posten "Jonas skylder mig".
   data.txs = data.txs.map((t) => (t.date === '2025-08-20' && t.text === 'MobilePay Jonas Lind' ? { ...t, manual: { type: 'internal', targetAccountId: 'acc-jonas' } } : t));
   data.valuations = [
+    { id: 'v-dep-s', accountId: 'acc-depot', date: '2024-12-31', value: 26800_00, adjustments: [] },
     { id: 'v-dep-0', accountId: 'acc-depot', date: '2025-06-30', value: 31000_00, adjustments: [] },
     { id: 'v-dep-1', accountId: 'acc-depot', date: '2025-12-31', value: 35650_00, adjustments: [] },
     { id: 'v-dep-2', accountId: 'acc-depot', date: '2026-06-30', value: 40100_00, adjustments: [] },
+    { id: 'v-bil-s', accountId: 'acc-bil', date: '2024-12-31', value: -79200_00, adjustments: [] },
     { id: 'v-bil-0', accountId: 'acc-bil', date: '2025-06-30', value: -68000_00, adjustments: [] },
     { id: 'v-bil-1', accountId: 'acc-bil', date: '2025-12-31', value: -56900_00, adjustments: [] },
     { id: 'v-bil-2', accountId: 'acc-bil', date: '2026-06-30', value: -45700_00, adjustments: [] },
   ];
-  data.openItems = [{ id: 'oi-demo', date: '2025-06-30', counterparty: 'Jonas skylder mig', accountId: 'acc-jonas', amount: 200_00, note: 'Koncertbillet fra juni' }];
+  data.openItems = [{ id: 'oi-demo', date: '2024-12-31', counterparty: 'Jonas skylder mig', accountId: 'acc-jonas', amount: 200_00, note: 'Koncertbillet fra december' }];
   const ids = data.accounts.map((a) => a.id);
   data.periods = [
-    { id: 'p-2025-h2', name: '2025 H2', start: '2025-07-01', end: '2025-12-31', accountIds: ids },
-    { id: 'p-2026-h1', name: '2026 H1', start: '2026-01-01', end: '2026-06-30', accountIds: ids },
+    { id: 'p-2025', name: '2025', start: '2025-01-01', end: '2025-12-31', accountIds: ids },
+    // 2026 er i gang – Regnskab viser 1. halvår.
+    { id: 'p-2026', name: '2026', start: '2026-01-01', end: '2026-12-31', accountIds: ids, show: 'h1' },
   ];
-  data.accounts = data.accounts.map((a) => (a.id === 'acc-bil' ? { ...a, notes: { 'p-2025-h2': 'Fast rente 4,9 %', 'p-2026-h1': 'Fast rente 4,9 %' } } : a));
+  data.accounts = data.accounts.map((a) => (a.id === 'acc-bil' ? { ...a, notes: { 'p-2025': 'Fast rente 4,9 %', 'p-2026': 'Fast rente 4,9 %' } } : a));
   data.bankMap = {
     'Dagligvarer|Supermarked': { type: 'expense', categoryId: 'ex-dagligvarer' },
     'Bolig|Husleje': { type: 'expense', categoryId: 'ex-bolig--husleje' },

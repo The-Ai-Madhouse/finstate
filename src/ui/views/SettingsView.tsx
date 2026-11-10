@@ -1,3 +1,4 @@
+import { compareOptions } from '../../domain/periods';
 import { deleteStatement, withNewPeriod } from '../components/PeriodPrompt';
 import { useEffect, useMemo, useState } from 'react';
 import { applyBackup, parseBackup } from '../../domain/backup';
@@ -372,18 +373,18 @@ function Periods() {
   return (
     <div className="card">
       <h2>Perioder</h2>
-      <InfoBox>Perioder er blot datointervaller over samme bogføring – du kan have både halvår og helår, og sammenligne vilkårligt.</InfoBox>
+      <InfoBox>Et financial statement er et år. Halvår vælges under Regnskab (hele året, 1. eller 2. halvår) – det er blot et udsnit af samme år. Datoerne kan rettes her, fx hvis dit regnskabsår ikke følger kalenderåret.</InfoBox>
       <table>
         <thead><tr><th>Navn</th><th>Start</th><th>Slut</th><th>Sammenlign med</th><th /></tr></thead>
         <tbody>
           {[...data.periods].sort((a, b) => (a.start < b.start ? -1 : 1)).map((p) => (
             <tr key={p.id}>
-              <td><input autoFocus={p.id === newPeriod} placeholder="Navn, fx 2025 H2" value={p.name} onChange={(ev) => set(p.id, { name: ev.target.value })} /></td>
+              <td><input autoFocus={p.id === newPeriod} placeholder="Navn, fx 2025" value={p.name} onChange={(ev) => set(p.id, { name: ev.target.value })} /></td>
               <td><input type="date" value={p.start} onChange={(ev) => set(p.id, { start: ev.target.value })} /></td>
               <td><input type="date" value={p.end} onChange={(ev) => set(p.id, { end: ev.target.value })} /></td>
               <td>
-                <SearchCombo options={data.periods.filter((x) => x.id !== p.id).map((x) => ({ id: x.id, label: x.name || `${x.start} – ${x.end}` }))} value={p.compareToId}
-                  allowClear="Automatisk" searchPlaceholder="Søg periode…" ariaLabel="Sammenlign med periode" onChange={(compareToId) => set(p.id, { compareToId })} />
+                <SearchCombo options={compareOptions(data, p, 'year')} value={p.compareToId}
+                  allowClear="Automatisk" searchPlaceholder="Søg år eller halvår…" ariaLabel="Sammenlign med periode" onChange={(compareToId) => set(p.id, { compareToId })} />
               </td>
               <td><button className="btn sm ghost danger" onClick={() => confirm(`Er du helt sikker på, at du vil slette ${p.name}?\n\nDet fjerner perioden, dens slideshow-tekster og bekræftelsen af balancen. Det kan ikke fortrydes uden backup.\n\nDine transaktioner, kategorier, regler og værdier bevares.`) && deleteStatement(p.id)}>Slet</button></td>
             </tr>

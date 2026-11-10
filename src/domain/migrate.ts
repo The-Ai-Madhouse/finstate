@@ -7,7 +7,7 @@
  * Den er idempotent: uden udlæg i data returneres data uændret.
  */
 import { resolveAll } from './classify';
-import type { Account, AppData, Classification, Split } from './types';
+import type { Account, AppData, Classification, Period, Split } from './types';
 import { uid } from './util';
 
 const isOutlay = (c?: { type: string }) => c?.type === 'outlay';
@@ -101,7 +101,7 @@ const LEGACY_TYPE_LABEL: Record<string, string | undefined> = {
  *    transaktionerne, og reglerne slås fra (de slettes ikke og kan slås til igen i Indstillinger).
  */
 export function migrateModel(input: AppData): AppData {
-  let d = input;
+  let d = migratePeriods(input);
   if (!d.accountTypes || d.accounts.some((a) => a.subtype !== undefined)) {
     const types: { id: string; name: string }[] = [...(d.accountTypes ?? [])];
     const idOf = (name: string) => {
@@ -149,4 +149,99 @@ export function migrateModel(input: AppData): AppData {
     d = { ...d, txs, settings: { ...d.settings, rulesEnabled: false } };
   }
   return d;
+}
+
+type Half = 'h1' | 'h2';
+function halfOf(p: Period): { year: string; half: Half } | undefined {
+  const year = p.start.slice(0, 4);
+  if (p.start === `${year}-01-01` && p.end === `${year}-06-30`) return { year, half: 'h1' };
+  if (p.start === `${year}-07-01` && p.end === `${year}-12-31`) return { year, half: 'h2' };
+  return undefined;
+}
+
+/**
+ * Financial statements er nu årlige. Halvårsperioder (H1/H2) lægges sammen til året:
+ *  - findes året allerede, bruges det; ellers bliver det seneste halvår til året (dets id bevares)
+ *  - poster, accepteret dækning, kommentarer og slideshow-tekster følger med
+ *  - fandtes kun ét halvår, viser Regnskab fortsat kun det halvår (kan ændres)
+ * Idempotent: uden halvårsperioder returneres data uændret.
+ */
+export function migratePeriods(d: AppData): AppData {
+  const halves = d.periods.filter((p) => halfOf(p));
+  if (!halves.length) return d;
+  const byYear = new Map<string, Period[]>();
+  for (const h of halves) {
+    const y = halfOf(h)!.year;
+    byYear.set(y, [...(byYear.get(y) ?? []), h]);
+  }
+  /** gammelt id → nyt id og hvilket halvår det var */
+  const moved = new Map<string, { id: string; half: Half }>();
+  let periods = d.periods.filter((p) => !halfOf(p));
+  for (const [year, hs] of byYear) {
+    hs.sort((a, b) => (a.start < b.start ? 1 : -1)); // 2. halvår først
+    const full = periods.find((p) => p.start === `${year}-01-01` && p.end === `${year}-12-31`);
+    const keep = full ?? hs[0];
+    const all = full ? [full, ...hs] : hs;
+    const union = (pick: (p: Period) => string[] | undefined) => {
+      const lists = all.map(pick).filter((x): x is string[] => !!x);
+      return lists.length ? [...new Set(lists.flat())] : undefined;
+    };
+    const merged: Period = {
+      ...keep,
+      start: `${year}-01-01`,
+      end: `${year}-12-31`,
+      name: full ? full.name : /^\s*\d{4}\s*H[12]\s*$/i.test(keep.name) ? year : keep.name.replace(/\s*H[12]\b/i, '').trim() || year,
+      accountIds: union((p) => p.accountIds),
+      coverageOk: union((p) => p.coverageOk),
+      // Bekræftelsen gælder balancen pr. ultimo – den holder kun, hvis ultimo er det samme.
+      balanceConfirmed: full ? full.balanceConfirmed : halfOf(keep)!.half === 'h2' ? keep.balanceConfirmed : undefined,
+      show: full ? full.show : hs.length === 1 ? halfOf(keep)!.half : undefined,
+    };
+    if (!merged.coverageOk) delete merged.coverageOk;
+    if (merged.balanceConfirmed === undefined) delete merged.balanceConfirmed;
+    if (merged.show === undefined) delete merged.show;
+    for (const h of hs) if (h.id !== merged.id) moved.set(h.id, { id: merged.id, half: halfOf(h)!.half });
+    periods = [...periods.filter((p) => p !== full), merged];
+  }
+  // Rækkefølge: 2. halvår før 1. halvår, så den seneste kommentar vinder.
+  const order = [...moved.entries()].sort((a, b) => (a[1].half === b[1].half ? 0 : a[1].half === 'h2' ? -1 : 1));
+  const remapRecord = <T,>(rec: Record<string, T> | undefined, keepIds: Set<string>) => {
+    if (!rec) return rec;
+    const out = { ...rec };
+    for (const [old, to] of order) {
+      if (!(old in out)) continue;
+      if (!(to.id in out) || !keepIds.has(to.id)) out[to.id] = out[old];
+      keepIds.add(to.id);
+      delete out[old];
+    }
+    return out;
+  };
+  const halfIds = new Set(halves.map((h) => h.id));
+  return {
+    ...d,
+    periods: periods.map((p) => {
+      if (!p.compareToId) return p;
+      const m = moved.get(p.compareToId);
+      // Sammenligning med et halvår bliver til "året#halvår"; med sig selv giver den ikke mening.
+      const halfSelf = halfIds.has(p.compareToId) && !m ? halfOf(d.periods.find((x) => x.id === p.compareToId)!) : undefined;
+      const key = m ? `${m.id}#${m.half}` : halfSelf ? `${p.compareToId}#${halfSelf.half}` : p.compareToId;
+      return { ...p, compareToId: key === p.id ? undefined : key };
+    }),
+    accounts: d.accounts.map((a) => (a.notes && [...moved.keys()].some((k) => k in a.notes!)
+      ? { ...a, notes: remapRecord(a.notes, new Set(Object.keys(a.notes).filter((k) => !moved.has(k)))) }
+      : a)),
+    slideNotes: halfSlideNotes(d.slideNotes, halves, moved),
+  };
+}
+
+/** Slideshow-tekster for et halvår gemmes under "<år-id>#h1"/"#h2" (de hører til det halvårlige slideshow). */
+function halfSlideNotes(rec: AppData['slideNotes'], halves: Period[], moved: Map<string, { id: string }>): AppData['slideNotes'] {
+  const out = { ...rec };
+  for (const h of halves) {
+    if (!(h.id in rec)) continue;
+    const key = `${moved.get(h.id)?.id ?? h.id}#${halfOf(h)!.half}`;
+    delete out[h.id];
+    out[key] = { ...rec[h.id], ...out[key] };
+  }
+  return out;
 }

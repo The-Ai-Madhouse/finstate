@@ -1,6 +1,6 @@
 import { NoPeriod } from '../components/PeriodPrompt';
 import { useEffect, useState, type ReactNode } from 'react';
-import { comparePeriod } from '../../domain/engine';
+import { compareFor, compareKey, scopeAvailable, scoped, type Scope } from '../../domain/periods';
 import { dateDa, kr, pctf, signedKr } from '../../domain/format';
 import { catDeltas, keyFigures, narrative } from '../../domain/insights';
 import type { Period } from '../../domain/types';
@@ -18,28 +18,32 @@ export function SlidesView() {
   return <Deck period={period} />;
 }
 
-function Deck({ period }: { period: Period }) {
+function Deck({ period: year }: { period: Period }) {
   const e = useEngine();
+  // Slideshowet følger, hvad Regnskab viser: hele året eller et halvår.
+  const scope: Scope = year.show && scopeAvailable(year, year.show) ? year.show : 'year';
+  const period = scoped(year, scope);
+  const notesKey = compareKey(year.id, scope);
   const update = useStore((s) => s.update);
   const [presenting, setPresenting] = useState<number | null>(null);
   const { data } = e;
   const s = e.statement(period);
-  const prevP = comparePeriod(data, period);
+  const prevP = compareFor(data, year, scope);
   const prev = prevP ? e.statement(prevP) : undefined;
   const k = keyFigures(s);
   const kp = prev ? keyFigures(prev) : undefined;
   const n = narrative(s, prev);
-  const notes = data.slideNotes[period.id] ?? {};
+  const notes = data.slideNotes[notesKey] ?? {};
   const text = (key: string, def: string) => notes[key] ?? def;
   const setText = (key: string, v: string | undefined) =>
     update((d) => {
-      const cur = { ...(d.slideNotes[period.id] ?? {}) };
+      const cur = { ...(d.slideNotes[notesKey] ?? {}) };
       if (v === undefined) delete cur[key];
       else cur[key] = v;
-      return { ...d, slideNotes: { ...d.slideNotes, [period.id]: cur } };
+      return { ...d, slideNotes: { ...d.slideNotes, [notesKey]: cur } };
     });
 
-  const trend = [...data.periods]
+  const trend = data.periods.map((p) => scoped(p, scope))
     .filter((p) => p.end <= period.end && p.end > data.settings.bookStart && Math.abs(Date.parse(p.end) - Date.parse(p.start) - (Date.parse(period.end) - Date.parse(period.start))) < 10 * 86400000)
     .sort((a, b) => (a.end < b.end ? -1 : 1))
     .map((p) => ({ label: p.name, value: e.statement(p).equityClose }));
@@ -140,7 +144,7 @@ function Deck({ period }: { period: Period }) {
     },
     {
       key: 'verdict', title: 'Hvordan gik det?', hint: 'Din samlede vurdering',
-      defaultText: `${n.summary}\n\n[Skriv din vurdering: Hvad lykkedes? Hvad vil du gøre anderledes næste halvår? Mål for ${period.name.replace(/\d{4}/, (y) => String(Number(y) + 1))}?]`,
+      defaultText: `${n.summary}\n\n[Skriv din vurdering: Hvad lykkedes? Hvad vil du gøre anderledes næste ${scope === 'year' ? 'år' : 'halvår'}? Mål for ${period.name.replace(/\d{4}/, (y) => String(Number(y) + 1))}?]`,
       render: (t) => <div className="comment" style={{ fontSize: '2.2cqw', color: 'var(--ink)' }}>{t}</div>,
     },
   ];

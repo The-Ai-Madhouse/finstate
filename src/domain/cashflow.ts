@@ -1,5 +1,6 @@
 import type { CatTotal, Statement } from './ledger';
 import type { Category, Period } from './types';
+import { elapsedEnd } from './periods';
 import { dayDiff } from './util';
 
 /** Gennemsnitlig månedslængde i dage (365,2425 / 12). */
@@ -62,13 +63,15 @@ export interface Cashflow {
 }
 
 export function cashflow(s: Statement, categories: Category[]): Cashflow {
-  const months = periodMonths(s.period);
+  // Et igangværende år: gennemsnit over de måneder, der er gået.
+  const span = { start: s.period.start, end: elapsedEnd(s.period) };
+  const months = periodMonths(span);
   const passive = passiveIncome(categories, s.income);
   const passiveExpense = passiveIncome(categories, s.expense);
   const incomeM = perMonth(s.incomeTotal, months);
   const expenseM = perMonth(s.expenseTotal, months);
   return {
-    days: periodDays(s.period),
+    days: periodDays(span),
     months,
     incomeM,
     expenseM,

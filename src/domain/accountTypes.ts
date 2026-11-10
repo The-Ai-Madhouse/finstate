@@ -113,3 +113,15 @@ export function switchKind(d: AppData, accountId: string, kind: Account['kind'])
     accounts: d.accounts.map((a) => (a.id === acc.id ? { ...a, kind, defaultCategoryId: a.defaultCategoryId ?? (kind === 'valuation' ? suggestCategory(d.categories, a.side) : undefined) } : a)),
   };
 }
+
+/**
+ * Sæt (eller fjern) værdien af en post, der tastes selv, på en dato.
+ * Værdien angives med postens naturlige fortegn – gæld som positivt tal.
+ */
+export function withValuation(d: AppData, acc: Pick<Account, 'id' | 'side'>, date: string, shown: number | undefined): AppData {
+  const ex = d.valuations.find((v) => v.accountId === acc.id && v.date === date);
+  if (shown === undefined) return { ...d, valuations: d.valuations.filter((v) => v !== ex) };
+  const value = acc.side === 'liability' ? -Math.abs(shown) : shown;
+  if (ex) return { ...d, valuations: d.valuations.map((v) => (v === ex ? { ...v, value } : v)) };
+  return { ...d, valuations: [...d.valuations, { id: uid('val'), accountId: acc.id, date, value, adjustments: [] }] };
+}

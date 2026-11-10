@@ -1,6 +1,6 @@
 import { NoPeriod } from '../components/PeriodPrompt';
 import { Fragment, useState } from 'react';
-import { KIND_HINT, KIND_LABEL, NO_TYPE, noteFor, suggestCategory, switchKind, typeName, withAccountInPeriods } from '../../domain/accountTypes';
+import { KIND_HINT, KIND_LABEL, NO_TYPE, noteFor, suggestCategory, switchKind, typeName, withAccountInPeriods, withValuation } from '../../domain/accountTypes';
 import { kr } from '../../domain/format';
 import type { BsRow } from '../../domain/ledger';
 import type { Account, Period, Valuation } from '../../domain/types';
@@ -118,16 +118,8 @@ function BalanceSheet({ period }: { period: Period }) {
 
 function useValuationActions(acc: Account) {
   const update = useStore((s) => s.update);
-  const liab = acc.side === 'liability';
-  const toStored = (v: number) => (liab ? -Math.abs(v) : v);
   return {
-    upsert: (date: string, shown: number | undefined) =>
-      update((d) => {
-        const ex = d.valuations.find((v) => v.accountId === acc.id && v.date === date);
-        if (shown === undefined) return { ...d, valuations: d.valuations.filter((v) => v !== ex) };
-        if (ex) return { ...d, valuations: d.valuations.map((v) => (v === ex ? { ...v, value: toStored(shown) } : v)) };
-        return { ...d, valuations: [...d.valuations, { id: uid('val'), accountId: acc.id, date, value: toStored(shown), adjustments: [] }] };
-      }),
+    upsert: (date: string, shown: number | undefined) => update((d) => withValuation(d, acc, date, shown)),
     patchValuation: (id: string, fn: (v: Valuation) => Valuation) =>
       update((d) => ({ ...d, valuations: d.valuations.map((v) => (v.id === id ? fn(v) : v)) })),
     patchAccount: (patch: Partial<Account>) =>

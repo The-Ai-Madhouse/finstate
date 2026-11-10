@@ -1,6 +1,11 @@
 import { NoPeriod } from '../components/PeriodPrompt';
 import { useState } from 'react';
-import { comparePeriod, inPeriod } from '../../domain/engine';
+import { inPeriod } from '../../domain/engine';
+import { compareFor, compareOptions, inProgress, SCOPE_LABEL, scopeAvailable, scoped, secondHalfStart, type Scope } from '../../domain/periods';
+import { dateDa } from '../../domain/format';
+import { withValuation } from '../../domain/accountTypes';
+import { addDays } from '../../domain/util';
+import type { Period } from '../../domain/types';
 import { kr, kr2f, pctf, signedKr } from '../../domain/format';
 import { cashflow, isPassive, perMonth, type Cashflow } from '../../domain/cashflow';
 import { noteFor, typeName } from '../../domain/accountTypes';
@@ -10,7 +15,7 @@ import { download, useEngine, usePeriod } from '../../store/actions';
 import { useData, useStore } from '../../store/store';
 import { BarCompare } from '../components/charts';
 import { SourcesDialog } from '../components/SourcesDialog';
-import { Money, ResultParts , SearchCombo } from '../components/common';
+import { AmountInput, Money, ResultParts, SearchCombo } from '../components/common';
 
 export function StatementView() {
   const e = useEngine();
@@ -19,13 +24,16 @@ export function StatementView() {
   const [compare, setCompare] = useState(false);
   if (!period) return <NoPeriod />;
   const { data } = e;
-  const s = e.statement(period);
-  const prevP = comparePeriod(data, period);
+  const scope: Scope = period.show && scopeAvailable(period, period.show) ? period.show : 'year';
+  const setScope = (show: Scope) => update((d) => ({ ...d, periods: d.periods.map((p) => (p.id === period.id ? { ...p, show: show === 'year' ? undefined : show } : p)) }));
+  const view = scoped(period, scope);
+  const s = e.statement(view);
+  const prevP = compareFor(data, period, scope);
   const prev = prevP ? e.statement(prevP) : undefined;
 
   const exportTx = () => {
     const rows = [['Dato', 'Konto', 'Tekst', 'Beløb', 'Saldo', 'Type', 'Kategori', 'Hovedkategori', 'Modpart/konto', 'Kilde', 'Bankens kommentar', 'Din note']];
-    for (const t of data.txs.filter((t) => inPeriod(t, period)).sort((a, b) => (a.date < b.date ? -1 : 1))) {
+    for (const t of data.txs.filter((t) => inPeriod(t, view)).sort((a, b) => (a.date < b.date ? -1 : 1))) {
       const r = e.resolved.get(t.id)!;
       for (const l of r.lines) {
         const cat = data.categories.find((c) => c.id === l.categoryId);
@@ -36,11 +44,11 @@ export function StatementView() {
         ]);
       }
     }
-    download(`finstate-transaktioner-${period.name}.csv`, '﻿' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
+    download(`finstate-transaktioner-${view.name}.csv`, '﻿' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
   };
 
   const exportStatement = () => {
-    const rows: string[][] = [['Sektion', 'Post', 'Underpost', period.name, prevP?.name ?? '']];
+    const rows: string[][] = [['Sektion', 'Post', 'Underpost', view.name, prevP?.name ?? '']];
     const cats = (title: string, now: CatTotal[], pv?: CatTotal[]) => {
       for (const c of now) {
         rows.push([title, c.name, '', kr2f(c.amount), pv ? kr2f(pv.find((x) => x.id === c.id)?.amount ?? 0) : '']);
@@ -53,7 +61,7 @@ export function StatementView() {
     for (const r of s.rows) rows.push([r.side === 'asset' ? 'Aktiver' : 'Passiver', r.label, 'ultimo', kr2f(Math.abs(r.close)), '']);
     rows.push(['Egenkapital', 'Primo', '', kr2f(s.equityOpen), '']);
     rows.push(['Egenkapital', 'Ultimo', '', kr2f(s.equityClose), '']);
-    download(`finstate-regnskab-${period.name}.csv`, '﻿' + rows.map((r) => r.map((c) => `"${c}"`).join(';')).join('\n'), 'text/csv');
+    download(`finstate-regnskab-${view.name}.csv`, '﻿' + rows.map((r) => r.map((c) => `"${c}"`).join(';')).join('\n'), 'text/csv');
   };
 
   const cf = cashflow(s, data.categories);
@@ -64,34 +72,46 @@ export function StatementView() {
     <div className="stack">
       <div className="row">
         <h1>Regnskab {period.name}</h1>
+        <div className="seg" role="radiogroup" aria-label="Vis">
+          {(['year', 'h1', 'h2'] as Scope[]).map((sc) => (
+            <button key={sc} role="radio" aria-checked={scope === sc} className={scope === sc ? 'on plain' : ''} disabled={!scopeAvailable(period, sc)}
+              title={scopeAvailable(period, sc) ? `${dateDa(scoped(period, sc).start)} – ${dateDa(scoped(period, sc).end)}` : '2. halvår er ikke begyndt endnu'}
+              onClick={() => setScope(sc)}>{SCOPE_LABEL[sc]}{sc === 'year' && inProgress(period) ? ' til nu' : ''}</button>
+          ))}
+        </div>
+        <span className="spacer" />
+        <button className="btn sm" onClick={exportStatement}>Eksportér regnskab (CSV)</button>
+        <button className="btn sm" onClick={exportTx}>Eksportér transaktioner (CSV)</button>
+      </div>
+      <div className="row small ink2" style={{ marginTop: -6 }}>
+        <span>{dateDa(view.start)} – {dateDa(view.end)}</span>
         <span className="spacer" />
         <label className="row small ink2">
           <input type="checkbox" checked={compare} disabled={!prev} onChange={(ev) => setCompare(ev.target.checked)} /> Sammenlign pr. måned med
         </label>
-        <SearchCombo className="sm combo-narrow" options={data.periods.filter((p) => p.id !== period.id).map((p) => ({ id: p.id, label: p.name || `${p.start} – ${p.end}` }))}
-          value={period.compareToId} allowClear={`Automatisk${prevP && !period.compareToId ? ` (${prevP.name})` : ''}`} searchPlaceholder="Søg periode…" ariaLabel="Sammenlign med periode"
+        <SearchCombo className="sm" options={compareOptions(data, period, scope)}
+          value={period.compareToId} allowClear={`Automatisk${prevP && !period.compareToId ? ` (${prevP.name})` : ''}`} searchPlaceholder="Søg år eller halvår…" ariaLabel="Sammenlign med"
           onChange={(id) => update((d) => ({ ...d, periods: d.periods.map((p) => (p.id === period.id ? { ...p, compareToId: id } : p)) }))} />
-        <button className="btn sm" onClick={exportStatement}>Eksportér regnskab (CSV)</button>
-        <button className="btn sm" onClick={exportTx}>Eksportér transaktioner (CSV)</button>
       </div>
+      {scope !== 'year' && <MidYearValues period={period} />}
 
       <div className="fs-grid">
         <section className="fs-card">
           <h2 className="fs-title">Resultatopgørelse</h2>
-          <PlSection title="Indtægter" kind="income" now={s.income} uncat={s.uncategorized.income} total={s.incomeTotal} months={cf.months} compareTo={compareTo} />
-          <PlSection title="Udgifter" kind="expense" now={s.expense} uncat={s.uncategorized.expense} total={s.expenseTotal} months={cf.months} compareTo={compareTo} />
+          <PlSection title="Indtægter" kind="income" now={s.income} uncat={s.uncategorized.income} total={s.incomeTotal} months={cf.months} compareTo={compareTo} period={view} />
+          <PlSection title="Udgifter" kind="expense" now={s.expense} uncat={s.uncategorized.expense} total={s.expenseTotal} months={cf.months} compareTo={compareTo} period={view} />
         </section>
         <Summary s={s} cf={cf} cfPrev={compareTo ? cfPrev : undefined} prevName={prevP?.name} />
       </div>
 
       <section className="fs-card">
-        <h2 className="fs-title">Balance <span className="small muted" style={{ fontWeight: 400 }}>pr. {period.end}</span></h2>
+        <h2 className="fs-title">Balance <span className="small muted" style={{ fontWeight: 400 }}>pr. {dateDa(view.end)}{inProgress(view) ? ' (året er i gang – seneste kendte saldi)' : ''}</span></h2>
         <BalanceColumns s={s} />
       </section>
 
       <div className="grid2">
-        <div className="card"><h2>Udgifter pr. kategori</h2><BarCompare rows={rowsFor(s.expense, prev?.expense)} nowLabel={period.name} prevLabel={prevP?.name} /></div>
-        <div className="card"><h2>Indtægter pr. kategori</h2><BarCompare rows={rowsFor(s.income, prev?.income)} nowLabel={period.name} prevLabel={prevP?.name} /></div>
+        <div className="card"><h2>Udgifter pr. kategori</h2><BarCompare rows={rowsFor(s.expense, prev?.expense)} nowLabel={view.name} prevLabel={prevP?.name} /></div>
+        <div className="card"><h2>Indtægter pr. kategori</h2><BarCompare rows={rowsFor(s.income, prev?.income)} nowLabel={view.name} prevLabel={prevP?.name} /></div>
       </div>
       <p className="small muted row">
         Kontrol: egenkapital primo {kr(s.equityOpen)} + resultat {kr(s.result)}{s.openingInPeriod ? ` + åbningsposter ${kr(s.openingInPeriod)}` : ''} = ultimo {kr(s.equityClose)}{' '}
@@ -115,8 +135,8 @@ const fmtMonths = (m: number) => new Intl.NumberFormat('da-DK', { maximumFractio
 type CompareTo = { s: Statement; cf: Cashflow; name: string };
 
 /** Indtægter eller udgifter: Beskrivelse | I perioden | Pr. måned (+ evt. sammenligning pr. måned). */
-function PlSection({ title, kind, now, uncat, total, months, compareTo }: {
-  title: string; kind: 'income' | 'expense'; now: CatTotal[]; uncat: number; total: number; months: number; compareTo?: CompareTo;
+function PlSection({ title, kind, now, uncat, total, months, compareTo, period }: {
+  title: string; kind: 'income' | 'expense'; now: CatTotal[]; uncat: number; total: number; months: number; compareTo?: CompareTo; period: Period;
 }) {
   const { categories } = useData();
   const update = useStore((st) => st.update);
@@ -136,7 +156,6 @@ function PlSection({ title, kind, now, uncat, total, months, compareTo }: {
   };
   const togglePassive = (id: string) => update((d) => ({ ...d, categories: d.categories.map((c) => (c.id === id ? { ...c, passive: !isPassive(d.categories, id) } : c)) }));
   const visible = now.filter((c) => c.amount || (prevList && prevList.find((x) => x.id === c.id)?.amount));
-  const period = usePeriod()!;
   const [sources, setSources] = useState<{ title: string; refs: Set<string> }>();
   /** Klikbart beløb → "Hvor kommer det fra?" */
   const amountLink = (v: number, title: string, ids: string[]) => (
@@ -236,7 +255,7 @@ function Summary({ s, cf, cfPrev, prevName }: { s: Statement; cf: Cashflow; cfPr
         <div className="num"><div className="fs-hero"><Money v={cf.cashflowM} signed /></div>{vs(cf.cashflowM, cfPrev?.cashflowM)}</div>
       </div>
       <p className="small muted">
-        Gennemsnit over {fmtMonths(cf.months)} måneder ({cf.days} dage, {s.period.start} – {s.period.end}). Resultat for hele perioden: <b><Money v={s.result} /></b>.
+        Gennemsnit over {fmtMonths(cf.months)} måneder ({cf.days} dage, {dateDa(s.period.start)} – {dateDa(addDays(s.period.start, cf.days - 1))}{inProgress(s.period) ? ', til i dag' : ''}). Resultat for {inProgress(s.period) ? 'perioden indtil nu' : 'hele perioden'}: <b><Money v={s.result} /></b>.
       </p>
     </aside>
   );
@@ -289,6 +308,42 @@ function BalanceColumns({ s }: { s: Statement }) {
         <span className="spacer" />
         <span className="fs-mid num"><Money precise v={s.equityClose} /></span>
         <span className={`small ${s.equityClose - s.equityOpen >= 0 ? 'pos' : 'neg'}`}>{signedKr(s.equityClose - s.equityOpen)} i perioden</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Et halvår kræver værdien midt i året for de poster, du taster selv (fx depot og lån) –
+ * ellers havner hele årets ændring i 2. halvår. Kan angives direkte her.
+ */
+function MidYearValues({ period }: { period: Period }) {
+  const data = useData();
+  const update = useStore((st) => st.update);
+  const mid = addDays(secondHalfStart(period), -1);
+  const listed = data.accounts.filter((a) => a.kind === 'valuation' && (period.accountIds ? period.accountIds.includes(a.id) : !a.archived));
+  const missing = listed.filter((a) => !data.valuations.some((v) => v.accountId === a.id && v.date === mid));
+  const [shown] = useState(() => new Set(missing.map((a) => a.id)));
+  const rows = listed.filter((a) => shown.has(a.id));
+  if (!rows.length) return null;
+  const stillMissing = rows.filter((a) => missing.includes(a));
+  return (
+    <div className={`card ${stillMissing.length ? 'warn-card' : ''}`}>
+      <div className="row small">
+        <b>{stillMissing.length ? `Værdi pr. ${dateDa(mid)} mangler` : `Værdier pr. ${dateDa(mid)}`}</b>
+        <span className="ink2">{stillMissing.length ? '– ellers bruges seneste kendte værdi, og hele ændringen havner i 2. halvår.' : '✓ halvårene er nu fordelt korrekt.'}</span>
+      </div>
+      <div className="row" style={{ marginTop: 8, gap: 16 }}>
+        {rows.map((a) => {
+          const v = data.valuations.find((x) => x.accountId === a.id && x.date === mid);
+          const sign = a.side === 'asset' ? 1 : -1;
+          return (
+            <label key={a.id} className="field">{a.name}
+              <AmountInput className={`sm ${v ? '' : 'missing'}`} value={v ? v.value * sign : undefined} placeholder="angiv værdi"
+                onCommit={(x) => update((d) => withValuation(d, a, mid, x))} ariaLabel={`${a.name} pr. ${mid}`} />
+            </label>
+          );
+        })}
       </div>
     </div>
   );

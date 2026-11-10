@@ -4,7 +4,8 @@ import { dateDa } from '../../domain/format';
 import type { Period } from '../../domain/types';
 import { withNewPeriod } from '../../domain/accountTypes';
 export { withNewPeriod };
-import { uid } from '../../domain/util';
+import { inProgress, yearPeriod } from '../../domain/periods';
+import { InfoBox, SearchCombo } from './common';
 import { usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 
@@ -19,7 +20,7 @@ export function deleteStatement(id: string) {
     delete slideNotes[id];
     return {
       ...d,
-      periods: d.periods.filter((p) => p.id !== id).map((p) => (p.compareToId === id ? { ...p, compareToId: undefined } : p)),
+      periods: d.periods.filter((p) => p.id !== id).map((p) => (p.compareToId?.split('#')[0] === id ? { ...p, compareToId: undefined } : p)),
       slideNotes,
     };
   });
@@ -35,84 +36,47 @@ export function startStatement(p: Period) {
   setView('overview');
 }
 
-type Kind = 'h1' | 'h2' | 'year' | 'custom';
-const KINDS: { id: Kind; label: string }[] = [
-  { id: 'h1', label: 'H1' },
-  { id: 'h2', label: 'H2' },
-  { id: 'year', label: 'Helår' },
-  { id: 'custom', label: 'Egne datoer' },
-];
-function presetFor(kind: Exclude<Kind, 'custom'>, year: number): Period {
-  if (kind === 'h1') return { id: `p-${year}-h1`, name: `${year} H1`, start: `${year}-01-01`, end: `${year}-06-30` };
-  if (kind === 'h2') return { id: `p-${year}-h2`, name: `${year} H2`, start: `${year}-07-01`, end: `${year}-12-31` };
-  return { id: `p-${year}`, name: `${year}`, start: `${year}-01-01`, end: `${year}-12-31` };
-}
-
-/** Formular: vælg slags (H1/H2/Helår/Egne datoer) og år. Bruges både på siden og i menuens skifter. */
+/** Formular: vælg år. Et financial statement er altid årligt – også mens året er i gang. */
 export function PeriodForm({ onDone, submitLabel = 'Start', onCancel, secondary }: { onDone?: () => void; submitLabel?: string; onCancel?: () => void; secondary?: boolean }) {
   const data = useStore((s) => s.data);
   const years = [...new Set(data.txs.map((t) => Number(t.date.slice(0, 4))))];
   const thisYear = new Date().getFullYear();
   const yearOptions = [...new Set([...years, thisYear, thisYear - 1, thisYear - 2])].sort((a, b) => b - a);
-  // Standard: seneste afsluttede halvår (det man typisk skal lave statement for).
-  const now = new Date();
-  const defaultKind: Kind = now.getMonth() >= 6 ? 'h1' : 'h2';
-  const defaultYear = now.getMonth() >= 6 ? thisYear : thisYear - 1;
-  const [kind, setKind] = useState<Kind>(defaultKind);
+  // Standard: er der gået et halvt år, starter man på i år (og kan vise 1. halvår i Regnskab) – ellers sidste år.
+  const defaultYear = new Date().getMonth() >= 6 ? thisYear : thisYear - 1;
   const [year, setYear] = useState<number>(defaultYear);
   const [name, setName] = useState('');
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
 
-  const preset = kind === 'custom' ? undefined : presetFor(kind, year);
-  const candidate: Period | undefined = preset
-    ? { ...preset, name: name.trim() || preset.name }
-    : name.trim() && start && end && start <= end ? { id: uid('p'), name: name.trim(), start, end } : undefined;
-  const exists = candidate && data.periods.find((p) => p.start === candidate.start && p.end === candidate.end);
-  const txCount = candidate ? data.txs.filter((t) => inPeriod(t, candidate)).length : 0;
+  const preset = yearPeriod(year);
+  const candidate: Period = { ...preset, name: name.trim() || preset.name };
+  const exists = data.periods.find((p) => p.start === candidate.start && p.end === candidate.end);
+  const txCount = data.txs.filter((t) => inPeriod(t, candidate)).length;
+  const running = inProgress(candidate);
   const submit = () => {
-    if (!candidate) return;
     startStatement(exists ?? candidate);
     onDone?.();
   };
 
   return (
     <div className="period-form" onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}>
-      <div className="seg" role="radiogroup" aria-label="Slags periode">
-        {KINDS.map((k) => (
-          <button key={k.id} className={kind === k.id ? 'on plain' : ''} onClick={() => { setKind(k.id); setName(''); }}>{k.label}</button>
-        ))}
+      <div className="row">
+        <label className="field">År
+          <SearchCombo className="combo-narrow" options={yearOptions.map((y) => ({ id: String(y), label: String(y) }))} value={String(year)}
+            onChange={(v) => { if (v) setYear(Number(v)); }} searchPlaceholder="Søg år…" ariaLabel="År" />
+        </label>
+        <label className="field grow">Navn
+          <input value={name} placeholder={preset.name} onChange={(e) => setName(e.target.value)} />
+        </label>
       </div>
-      {kind !== 'custom' ? (
-        <div className="row" style={{ marginTop: 10 }}>
-          <label className="field">År
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </label>
-          <label className="field grow">Navn
-            <input value={name} placeholder={preset!.name} onChange={(e) => setName(e.target.value)} />
-          </label>
-        </div>
-      ) : (
-        <div className="col" style={{ marginTop: 10 }}>
-          <label className="field">Navn<input autoFocus value={name} placeholder="Fx Skoleår 25/26" onChange={(e) => setName(e.target.value)} /></label>
-          <div className="row">
-            <label className="field">Fra<input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
-            <label className="field">Til<input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
-          </div>
-        </div>
-      )}
       <div className="row small" style={{ marginTop: 12, flexWrap: 'nowrap' }}>
-        {candidate ? (
-          <span className="ink2 ellipsis">
-            {dateDa(candidate.start)} – {dateDa(candidate.end)}{data.txs.length ? ` · ${txCount} transaktioner` : ''}
-            {exists && <> · <b>findes allerede</b></>}
-          </span>
-        ) : <span className="muted">Udfyld navn og datoer</span>}
+        <span className="ink2 ellipsis">
+          {dateDa(candidate.start)} – {dateDa(candidate.end)}{data.txs.length ? ` · ${txCount} transaktioner` : ''}
+          {running && !exists && <> · året er i gang</>}
+          {exists && <> · <b>findes allerede</b></>}
+        </span>
         <span className="spacer" />
         {onCancel && <button className="btn sm ghost" onClick={onCancel}>Annullér</button>}
-        <button className={`btn sm ${secondary ? '' : 'primary'}`} disabled={!candidate} onClick={submit}>{exists ? `Åbn ${exists.name}` : submitLabel}</button>
+        <button className={`btn sm ${secondary ? '' : 'primary'}`} style={{ whiteSpace: 'nowrap' }} onClick={submit}>{exists ? `Åbn ${exists.name}` : submitLabel}</button>
       </div>
     </div>
   );
@@ -128,8 +92,9 @@ export function NoPeriod({ title = 'Start et financial statement' }: { title?: s
     <div className={`card start-card ${setupMissing ? 'waiting' : ''}`} style={{ maxWidth: 640 }}>
       <h2>{setupMissing ? `Derefter: ${title.toLowerCase()}` : title}</h2>
       <p className="ink2" style={{ marginBottom: 14 }}>
-        Et financial statement laves for en periode – typisk et halvår eller et helt år. Vælg perioden, så tager guiden dig igennem import, kategorisering og balance for netop den.
+        Et financial statement dækker et helt år. Vælg året, så tager guiden dig igennem import, kategorisering og balance for det.
       </p>
+      <InfoBox label="Midt i året?">Er året ikke slut endnu, så start bare på det alligevel. Under Regnskab kan du vælge kun at vise 1. halvår – eller hele året indtil nu.</InfoBox>
       <PeriodForm submitLabel="Start financial statement" secondary={setupMissing} />
       {periods.length > 0 && (
         <div className="row small" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>

@@ -24,7 +24,7 @@ export function OverviewView() {
         <h1>{firstTime ? 'Velkommen til Finstate' : 'Overblik'}</h1>
         {firstTime && (
           <p className="ink2">
-            Dit halvårlige/årlige financial statement – bygget på dobbelt bogholderi og kørende 100 % i din browser. Ingen server, intet login, ingen data ud af maskinen.
+            Dit årlige financial statement – bygget på dobbelt bogholderi og kørende 100 % i din browser. Ingen server, intet login, ingen data ud af maskinen.
             Du starter med at vælge perioden, og så tager guiden dig igennem resten.
           </p>
         )}
@@ -52,7 +52,7 @@ export function OverviewView() {
   const trend = [...data.periods]
     .filter((p) => p.end <= period.end && p.end > data.settings.bookStart)
     .sort((a, b) => (a.end < b.end ? -1 : 1))
-    // Brug kun ikke-overlappende perioder (fx H1/H2 – ikke også helår).
+    // Brug kun ikke-overlappende perioder.
     .filter((p, i, arr) => !arr.some((o, j) => j !== i && o.end === p.end && o.start > p.start))
     .map((p) => ({ label: p.name, value: e.statement(p).equityClose }));
 

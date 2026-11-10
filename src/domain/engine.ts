@@ -1,3 +1,4 @@
+import { compareFor, elapsedEnd, inProgress, yearPeriod } from './periods';
 import { migrateModel, migrateOutlays } from './migrate';
 import { NEEDS_REVIEW, resolveAll, type Resolved } from './classify';
 import { kr } from './format';
@@ -33,11 +34,9 @@ export function buildEngine(data: AppData): Engine {
 
 export const inPeriod = (t: { date: string }, p: Period) => t.date >= p.start && t.date <= p.end;
 
+/** Hele året sammenlignes med dit valg eller forrige år (se compareFor for halvår). */
 export function comparePeriod(data: AppData, p: Period): Period | undefined {
-  if (p.compareToId) return data.periods.find((x) => x.id === p.compareToId);
-  const len = dayDiff(p.start, p.end);
-  const earlier = data.periods.filter((x) => x.end < p.start).sort((a, b) => (a.end < b.end ? 1 : -1));
-  return earlier.find((x) => Math.abs(dayDiff(x.start, x.end) - len) <= 5) ?? earlier[0];
+  return compareFor(data, p, 'year');
 }
 
 export type CheckLevel = 'ok' | 'info' | 'warn' | 'error';
@@ -74,7 +73,9 @@ export function periodChecks(e: Engine, p: Period): Check[] {
       continue;
     }
     const last = accTx[accTx.length - 1].date;
-    if (last < p.end && dayDiff(last, p.end) > 14 && !p.coverageOk?.includes(acc.id)) {
+    // Et igangværende år skal kun have data frem til i dag.
+    const until = elapsedEnd(p);
+    if (last < until && dayDiff(last, until) > 14 && !p.coverageOk?.includes(acc.id)) {
       out.push({ id: `cover-${acc.id}`, level: 'info', title: `${acc.name}: sidste transaktion er ${last}`, detail: 'Importér evt. en nyere eksport, hvis kontoen har haft bevægelser siden.', view: 'import' });
     }
     const breaks = chain.breaks.filter((b) => inPeriod(b, p));
@@ -123,7 +124,9 @@ export function periodChecks(e: Engine, p: Period): Check[] {
   // 5. Værdier
   for (const acc of data.accounts.filter((a) => a.kind === 'valuation' && listed(a))) {
     const has = data.valuations.some((v) => v.accountId === acc.id && v.date === p.end);
-    if (!has) out.push({ id: `val-${acc.id}`, level: 'warn', title: `${acc.name}: angiv værdi pr. ${p.end}`, view: 'balance' });
+    if (!has) out.push(inProgress(p)
+      ? { id: `val-${acc.id}`, level: 'info', title: `${acc.name}: angiv værdi pr. ${p.end}, når året er slut`, view: 'balance' }
+      : { id: `val-${acc.id}`, level: 'warn', title: `${acc.name}: angiv værdi pr. ${p.end}`, view: 'balance' });
   }
   for (const w of ledger.warnings) out.push({ id: `w-${w}`, level: 'warn', title: w, view: 'balance' });
 
@@ -141,11 +144,7 @@ export function suggestPeriods(data: AppData): Period[] {
   const years = new Set(data.txs.map((t) => Number(t.date.slice(0, 4))));
   if (!years.size) years.add(new Date().getFullYear());
   const out: Period[] = [];
-  for (const y of [...years].sort()) {
-    out.push({ id: `p-${y}-h1`, name: `${y} H1`, start: `${y}-01-01`, end: `${y}-06-30` });
-    out.push({ id: `p-${y}-h2`, name: `${y} H2`, start: `${y}-07-01`, end: `${y}-12-31` });
-    out.push({ id: `p-${y}`, name: `${y}`, start: `${y}-01-01`, end: `${y}-12-31` });
-  }
+  for (const y of [...years].sort()) out.push(yearPeriod(y));
   return out.filter((p) => !data.periods.some((x) => x.id === p.id));
 }
 

@@ -177,7 +177,7 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
             )}
             {celebrate && rulesOn && auto > 0 && (
               <p className="small ink2" style={{ marginTop: 8 }}>
-                Dine regler sparede dig for {auto} beslutninger i dag – og de virker også næste halvår.
+                Dine regler sparede dig for {auto} beslutninger i dag – og de virker også næste år.
               </p>
             )}
           </div>

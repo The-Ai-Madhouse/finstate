@@ -173,6 +173,8 @@ export interface Period {
   accountIds?: string[];
   /** Bankkonti hvor brugeren har accepteret, at data ikke dækker hele perioden (fx lukket konto). */
   coverageOk?: string[];
+  /** Hvad Regnskab viser af året: hele året (standard) eller kun et halvår. */
+  show?: 'year' | 'h1' | 'h2';
 }
 
 /** Brugerens egne posttyper (fx "Opsparing", "Lån"). "Ingen type" er altid en mulighed. */
