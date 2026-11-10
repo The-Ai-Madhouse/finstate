@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
-import { dateShort, kr } from '../../domain/format';
-import type { Tx } from '../../domain/types';
-import { pairBank, pairOnPost, pairPlain, useEngine, usePeriod } from '../../store/actions';
+import { dateShort } from '../../domain/format';
+import type { Classification, Tx } from '../../domain/types';
+import { pairBank, pairOnPost, pairPlain, setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { CategoryCombo, Money, SearchCombo } from './common';
-import { withAccountInPeriods } from '../../domain/accountTypes';
-import { uid } from '../../domain/util';
+import { CategoryCombo, ClassEditor, Money, isComplete } from './common';
+import { linkTxs } from '../../domain/links';
 
 /**
- * Par to transaktioner. Går de ikke op, skriver man, hvor resten hører hjemme:
- *  · på en post (fx "Jonas skylder mig"): resten bliver stående på posten – eller afskrives som udgift/indtægt
- *  · mellem dine konti: resten (fx et gebyr) bogføres i en kategori
- *  · almindelige transaktioner (fx udlæg og indbetaling): begge bogføres i én kategori, så kun resten tæller
+ * Par to transaktioner – med samme valg som i kategoriseringen (udgift/indtægt eller intern), der gælder for begge.
+ *  · Udgift/indtægt: begge i kategorien, så kun forskellen tæller.
+ *  · Intern: på en post (fx "Jonas skylder mig") afstemmes de dér; en forskel kan afskrives – ellers bliver den stående
+ *    (og kan senere afskrives eller tages med til næste periode under Afstemning).
  */
 export function PairDialog() {
   const draft = useStore((s) => s.pairDraft);
@@ -30,117 +29,77 @@ function PairDialogInner() {
   const e = useEngine();
   const period = usePeriod();
   const draft = useStore((s) => s.pairDraft)!;
-  const update = useStore((s) => s.update);
   const close = () => useStore.getState().setPairDraft(undefined);
   const { pick, otherId } = draft;
   const a = e.txById.get(pick.txId);
   const b = e.txById.get(otherId);
-  const lines = (t?: Tx) => (t ? e.resolved.get(t.id)?.lines ?? [] : []);
-  const tracked = e.data.accounts.filter((x) => x.kind === 'tracked' && !x.archived);
-  // Står en af dem allerede på en post (fx "Jonas skylder mig"), er det oplagt at afstemme dér.
-  const postOf = (t?: Tx) => lines(t).find((l) => l.type === 'internal' && tracked.some((x) => x.id === l.targetAccountId))?.targetAccountId;
-  const catOf = (t?: Tx) => lines(t).find((l) => l.categoryId)?.categoryId;
-  const initialPost = pick.postId ?? postOf(a) ?? postOf(b);
-  const [kind, setKind] = useState<'post' | 'plain'>(initialPost ? 'post' : 'plain');
-  const [postId, setPostId] = useState<string | undefined>(initialPost);
-  const [categoryId, setCategoryId] = useState<string | undefined>(() => catOf(a) ?? catOf(b));
-  const [rest, setRest] = useState<'later' | 'writeoff' | 'carry'>('later');
+  const sum = (a?.amount ?? 0) + (b?.amount ?? 0); // fra bankens side
+  // Samme valg som i kategoriseringen – forudfyldt med det, en af dem allerede er.
+  const [cls, setCls] = useState<Classification>(() => {
+    if (pick.mode === 'bank' && a && b) return { type: 'internal', targetAccountId: b.accountId };
+    if (pick.postId) return { type: 'internal', targetAccountId: pick.postId };
+    for (const t of [a, b]) {
+      const l = t && e.resolved.get(t.id)?.lines.find((x) => (x.type === 'internal' && x.targetAccountId) || x.categoryId);
+      if (l?.type === 'internal' && l.targetAccountId !== a?.accountId) return { type: 'internal', targetAccountId: l.targetAccountId };
+      if (l?.categoryId) return { type: l.type, categoryId: l.categoryId };
+    }
+    return { type: sum < 0 ? 'expense' : 'income' };
+  });
+  const [writeOff, setWriteOff] = useState(false);
+  const [writeOffCat, setWriteOffCat] = useState<string>();
   if (!a || !b || !period) return null;
-  const acc = (id: string) => e.data.accounts.find((x) => x.id === id)?.name ?? '';
-  const sum = a.amount + b.amount; // fra bankens side
+  const acc = (id?: string) => e.data.accounts.find((x) => x.id === id);
   const zero = sum === 0;
-  const restKind = sum < 0 ? 'udgift' : 'indtægt';
-  const bank = pick.mode === 'bank';
-  const post = postId ? e.data.accounts.find((x) => x.id === postId) : undefined;
-  const needsCategory = bank ? !zero : kind === 'plain' || (!zero && rest === 'writeoff');
-  const ok = (bank || kind === 'plain' || !!post) && (!needsCategory || !!categoryId);
-  const next = /^\d{4}$/.test(period.name.trim()) ? String(Number(period.name.trim()) + 1) : 'næste periode';
-  const createPost = (name: string) => {
-    const id = uid('acc');
-    // Lægger du ud (penge ud), skylder den anden dig: en aktiv. Ellers en passiv.
-    const side = sum <= 0 ? 'asset' : 'liability';
-    update((d) => withAccountInPeriods({ ...d, accounts: [...d.accounts, { id, name: name.trim(), kind: 'tracked', side, aliases: [] }] }, id, period.id));
-    setPostId(id);
-  };
+  const internal = cls.type === 'internal';
+  const target = acc(cls.targetAccountId);
+  // Afskrivning giver kun mening ved intern: ved udgift/indtægt er forskellen allerede den udgift/indtægt.
+  const canWriteOff = internal && !zero;
+  const ok = isComplete(cls) && (!canWriteOff || !writeOff || !!writeOffCat);
   const save = () => {
     if (!ok) return;
-    if (bank) pairBank(a.id, b.id, zero ? undefined : categoryId);
-    else if (kind === 'post' && post) pairOnPost(period, post.id, a.id, b.id, !zero && rest === 'writeoff' ? categoryId : undefined, !zero && rest === 'carry');
-    else if (categoryId) pairPlain(a.id, b.id, categoryId);
+    const wo = canWriteOff && writeOff ? writeOffCat : undefined;
+    if (!internal) pairPlain(a.id, b.id, cls.categoryId!);
+    else if (target?.kind === 'tracked') pairOnPost(period, target.id, a.id, b.id, wo);
+    else if (target && (target.id === a.accountId || target.id === b.accountId || target.kind === 'bank')) pairBank(a.id, b.id, wo);
+    else { setManual([a.id, b.id], cls); useStore.getState().update((d) => linkTxs(d, a.id, b.id)); }
     close();
   };
   const line = (t: Tx) => (
     <div className="row small pair-line">
       <span className="muted" style={{ minWidth: 64 }}>{dateShort(t.date)}</span>
-      <span className="muted" style={{ minWidth: 110 }}>{acc(t.accountId)}</span>
+      <span className="muted" style={{ minWidth: 110 }}>{acc(t.accountId)?.name}</span>
       <span className="grow ellipsis" title={t.text}>{t.text}</span>
       <Money v={t.amount} decimals colored />
     </div>
   );
   return (
     <div className="modal-backdrop" onMouseDown={close}>
-      <div className="modal card pair-modal" role="dialog" aria-label="Par transaktioner" onMouseDown={(ev) => ev.stopPropagation()} onKeyDown={(ev) => { if (ev.key === 'Enter' && (ev.target as HTMLElement).getAttribute('role') !== 'combobox') save(); }}>
+      <div className="modal card pair-modal" role="dialog" aria-label="Par transaktioner" onMouseDown={(ev) => ev.stopPropagation()}>
         <div className="card-head">
-          <h2 className="grow">{bank ? 'Par overførslen' : 'Par transaktionerne'}</h2>
+          <h2 className="grow">Par transaktionerne</h2>
           <button className="btn sm ghost" onClick={close} aria-label="Luk">✕</button>
         </div>
         {line(a)}
         {line(b)}
         <div className="row pair-sum">
-          <b>I alt</b>
+          <b>Forskel</b>
           <span className="spacer" />
-          {zero ? <span className="chip user">✓ Går op</span> : <span className="chip review">Forskel: {kr(Math.abs(sum))} {restKind}</span>}
-          <b><Money v={sum} decimals signed /></b>
+          {zero ? <span className="chip user">✓ Går op</span> : <b><Money v={sum} decimals signed /></b>}
         </div>
 
-        {bank ? (
-          <div className="pair-choice">
-            <p className="small ink2">Begge bliver en intern overførsel mellem {acc(a.accountId)} og {acc(b.accountId)}.</p>
-            {!zero && (
-              <label className="field">Forskellen ({kr(Math.abs(sum))}, fx et gebyr) bogføres som
-                <CategoryCombo className="sm" value={categoryId} onChange={setCategoryId} primaryKind={sum < 0 ? 'expense' : 'income'} placeholder="vælg kategori" />
-              </label>
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="seg pair-kind" role="radiogroup" aria-label="Hvordan skal de bogføres?">
-              <button role="radio" aria-checked={kind === 'post'} className={kind === 'post' ? 'on plain' : ''} onClick={() => setKind('post')} title="Fx et udlæg og tilbagebetalingen: de flytter penge til/fra en post på din balance og afstemmes dér">Intern – afstemmes på en post</button>
-              <button role="radio" aria-checked={kind === 'plain'} className={kind === 'plain' ? 'on plain' : ''} onClick={() => setKind('plain')} title="Fx et køb og en refusion: begge bogføres i én kategori">Udgift/indtægt</button>
-            </div>
+        <ClassEditor value={cls} onChange={(c) => setCls(c)} amount={zero ? a.amount : sum} accountId={a.accountId} compact />
 
-            {kind === 'post' ? (
-              <div className="pair-choice">
-                <label className="field">Post
-                  <SearchCombo className="sm" value={postId} placeholder="vælg post – fx Jonas skylder mig" searchPlaceholder="Søg post…" ariaLabel="Post til afstemning" emptyText="Ingen post matcher"
-                    options={tracked.map((x) => ({ id: x.id, label: x.name }))} onChange={setPostId}
-                    onCreate={(q) => q.trim() && createPost(q)} createLabel={(q) => (q ? `+ Opret "${q}" som ny post` : '+ Ny post…')} />
-                </label>
-                {post && <p className="small ink2">Begge bliver "Intern → {post.name}", og {post.name} afstemmes i {period.name}.</p>}
-                {!zero && post && (
-                  <>
-                    <div className="small"><b>Forskellen på {kr(Math.abs(sum))}</b></div>
-                    <label className="row small"><input type="radio" checked={rest === 'later'} onChange={() => setRest('later')} /> Afgør senere – den står som uafklaret i afstemningen af {post.name}</label>
-                    <label className="row small"><input type="radio" checked={rest === 'writeoff'} onChange={() => setRest('writeoff')} /> Afskriv den som {restKind} – afskrivningen lægges i samme gruppe på {post.name}</label>
-                    {rest === 'writeoff' && <CategoryCombo className="sm" value={categoryId} onChange={setCategoryId} primaryKind={sum < 0 ? 'expense' : 'income'} placeholder="vælg kategori" />}
-                    <label className="row small"><input type="radio" checked={rest === 'carry'} onChange={() => setRest('carry')} /> Tag den med til {next} – den bliver stående på {post.name}</label>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="pair-choice">
-                <label className="field">{zero ? 'Bogfør begge under' : `Hvor hører ${restKind}en på ${kr(Math.abs(sum))} hjemme?`}
-                  <CategoryCombo className="sm" value={categoryId} onChange={setCategoryId} primaryKind={sum < 0 ? 'expense' : 'income'} placeholder="vælg kategori" />
-                </label>
-                <p className="small muted">
-                  {zero ? 'De går op – begge bogføres i kategorien, så de ikke påvirker resultatet.' : `Begge bogføres i kategorien, så kun forskellen (${kr(Math.abs(sum))}) tæller som ${restKind}.`}
-                </p>
-              </div>
-            )}
-          </>
+        {!internal && !zero && cls.categoryId && <p className="small muted" style={{ margin: 0 }}>Kun forskellen tæller i kategorien.</p>}
+        {canWriteOff && (
+          <div className="row small pair-writeoff">
+            <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={writeOff} onChange={(ev) => setWriteOff(ev.target.checked)} /> Afskriv forskellen</label>
+            {writeOff
+              ? <CategoryCombo className="sm" value={writeOffCat} onChange={setWriteOffCat} primaryKind={sum < 0 ? 'expense' : 'income'} placeholder="som …" />
+              : <span className="muted">{target?.kind === 'tracked' ? `ellers bliver den stående på ${target.name}` : ''}</span>}
+          </div>
         )}
 
-        <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+        <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
           <button className="btn sm" onClick={close}>Annullér</button>
           <button className="btn sm primary" disabled={!ok} onClick={save}>⇄ Par</button>
         </div>
