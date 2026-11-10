@@ -598,3 +598,8 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 
 /* Importerede filer: perioden som titel, filnavnet diskret nedenunder */
 .file-sub { max-width: 340px; padding-left: 18px; }
+
+/* Faste udgifter pr. måned */
+.fixed-table th, .fixed-table td { white-space: nowrap; padding-left: 5px; padding-right: 5px; font-size: 12.5px; }
+.fixed-table td:first-child { font-size: 13px; }
+.fixed-table td.num, .fixed-table th.num { font-variant-numeric: tabular-nums; }
