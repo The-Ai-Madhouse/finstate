@@ -160,7 +160,8 @@ export function resolveAll(data: Pick<AppData, 'rules' | 'accounts' | 'bankMap' 
   // Dine egne parringer (begge peger på hinanden).
   const txById = new Map(data.txs.map((t) => [t.id, t]));
   const explicit = new Map<string, string>();
-  const isInternal = (id: string) => s1.get(id)?.lines.every((l) => l.type === 'internal') ?? false;
+  // En egen parring kræver, at begge er (delvist) interne – en rest kan være bogført på en kategori (fx et gebyr).
+  const isInternal = (id: string) => s1.get(id)?.lines.some((l) => l.type === 'internal') ?? false;
   for (const t of data.txs) if (t.pairWith && txById.get(t.pairWith)?.pairWith === t.id && isInternal(t.id) && isInternal(t.pairWith)) explicit.set(t.id, t.pairWith);
   const cands = data.txs.filter((tx) => {
     if (explicit.has(tx.id) || tx.noAutoPair) return false;

@@ -6,9 +6,9 @@ import { kr, kr2f, parseAmount } from '../../domain/format';
 import { type Account, type Category, type Classification, type Period, type Tx, type TxType } from '../../domain/types';
 import { newCategoryId } from '../../domain/defaults';
 import { useData, useStore, type LinkPick, type View } from '../../store/store';
-import { pairOnPost, pairTxs, setMemo, useEngine, usePeriod } from '../../store/actions';
+import { setMemo, useEngine, usePeriod } from '../../store/actions';
 import { balancesAt, isTransitRef, transitName } from '../../domain/ledger';
-import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
+import { linkedWith, unlinkTx } from '../../domain/links';
 import { postMovements, transferInfo } from '../../domain/transfers';
 import { isSettled, settleState } from '../../domain/settle';
 import { dateShort } from '../../domain/format';
@@ -673,7 +673,7 @@ export function TxNotes({ tx }: { tx: Tx }) {
 /** Hvad "vælg en anden transaktion" skal gøre for denne transaktion – eller intet (fx parrede overførsler). */
 function pickModeFor(e: Engine, tx: Tx, period?: Period): Omit<LinkPick, 'txId'> | undefined {
   const info = period ? transferInfo(e.data, e.resolved, e.txById, tx, period) : undefined;
-  if (!info) return { mode: 'link' };
+  if (!info) return { mode: 'plain' };
   if (info.kind === 'missing') return { mode: 'bank' };
   if (info.kind === 'direct' && info.target?.kind === 'tracked' && period) {
     const inGroup = settleState(e.data, e.ledger, info.target.id, period).groups.some((g) => g.items.some((i) => i.key === `tx:${tx.id}`));
@@ -692,13 +692,11 @@ function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
   return !src.link || other.link !== src.link;
 }
 
-/** Udfør valget: knyt sammen, par på posten (den anden flyttes til samme post) eller par overførslen. */
+/** Den anden er valgt: vis parringen, så man kan se om det går op – og skrive, hvor en evt. rest skal hen. */
 function completePick(pick: LinkPick, otherId: string) {
-  const { update, setLinkPick } = useStore.getState();
-  if (pick.mode === 'link') update((d) => linkTxs(d, pick.txId, otherId));
-  else if (pick.mode === 'bank') pairTxs(pick.txId, otherId);
-  else if (pick.postId && pick.periodId) pairOnPost(pick.periodId, pick.postId, pick.txId, otherId);
+  const { setLinkPick, setPairDraft } = useStore.getState();
   setLinkPick(undefined);
+  setPairDraft({ pick, otherId });
 }
 
 /**
@@ -717,7 +715,9 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   const setLinkPick = useStore((s) => s.setLinkPick);
   const others = linkedWith(txs, tx);
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
-  const accepted = useStore((s) => (tx.link ? s.data.linkGroups?.[tx.link]?.accepted === sum : false));
+  // Resten hører hjemme i den kategori, de parrede står i (samme for alle i gruppen).
+  const cats = new Set([tx, ...others].map((t) => e.resolved.get(t.id)?.lines.find((l) => l.categoryId)?.categoryId ?? ''));
+  const restCat = cats.size === 1 ? [...cats][0] || undefined : undefined;
   const showTransfers = useStore((s) => s.showTransfers);
   const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '';
   const mode = pickModeFor(e, tx, period);
@@ -733,16 +733,16 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
       .map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${t.text} · ${kr2f(t.amount)}`, hint: `· ${accName(t.accountId)}${pick.mode === 'post' && !isInternalTo(e, t, pick.postId!) ? ' · flyttes til posten' : ''}` }))
     : [];
   const postName = pick?.postId ? accName(pick.postId) : mode?.postId ? accName(mode.postId) : '';
-  const btnLabel = mode?.mode === 'post' ? '⇄ Par…' : mode?.mode === 'bank' ? '⇄ Find modpost…' : others.length ? '+ Flere' : '🔗 Hører sammen med…';
+  const btnLabel = mode?.mode === 'bank' ? '⇄ Find modpost…' : others.length ? '⇄ Par med flere…' : '⇄ Par…';
   const btnTitle = mode?.mode === 'post' ? `Par med det, den hører sammen med på ${postName} – fx tilbagebetalingen. Står den anden som noget andet, flyttes den til ${postName}.`
     : mode?.mode === 'bank' ? 'Find den anden side af overførslen – den sættes til intern overførsel mellem de to konti'
-    : 'Knyt transaktionen til en anden – en note til dig selv om, at de hører sammen';
+    : 'Par med en anden transaktion (fx et udlæg og indbetalingen). Går de ikke op, vælger du, hvor resten hører hjemme.';
   return (
     <>
       <TxRelations tx={tx} />
       {others.length > 0 && (
         <div className="tx-links" onKeyDown={(ev) => ev.stopPropagation()}>
-          <span className="tx-links-label" title="Din egen note om, at transaktionerne hører sammen – ændrer ikke regnskabet">🔗 Hører sammen med</span>
+          <span className="tx-links-label" title="Parret af dig – begge står i samme kategori, så kun resten tæller">⇄ Parret med</span>
           {others.map((o) => (
             <span key={o.id} className="tx-link">
               <button className="linkish" title="Vis transaktionen" onClick={() => showTx(o.id)}>{dateShort(o.date)} {o.text}</button>
@@ -751,16 +751,16 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
             </span>
           ))}
           <span className="small muted">i alt <span className={sum === 0 ? 'pos' : ''}>{kr2f(sum)}{sum === 0 ? ' ✓' : ''}</span></span>
-          {sum !== 0 && (accepted
-            ? <span className="chip user" title="Differencen er afskrevet under Afstemning">✓ afskrevet</span>
-            : <button className="tx-link-x" title="Se gruppen under Afstemning – og afskriv differencen" onClick={() => showTransfers({ settle: true })}>Afstem →</button>)}
-          <button className="tx-link-x" title="Fjern denne transaktion fra gruppen" aria-label="Fjern fra gruppen" onClick={() => update((d) => unlinkTx(d, tx.id))}>Fjern</button>
+          {sum !== 0 && (restCat
+            ? <span className="small">resten → <b>{categoryLabel(e.data.categories, restCat)}</b></span>
+            : <button className="tx-link-x" title="Vælg, hvor resten hører hjemme – under Afstemning" onClick={() => showTransfers({ settle: true })}>Placér resten →</button>)}
+          <button className="tx-link-x" title="Ophæv parringen for denne transaktion (kategorien bevares)" aria-label="Ophæv parring" onClick={() => update((d) => unlinkTx(d, tx.id))}>Ophæv</button>
         </div>
       )}
       {pick ? (
         <span className="tx-link-add" onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') setLinkPick(undefined); }}>
           <SearchCombo className="sm" options={options} value={undefined}
-            placeholder={pick.mode === 'post' ? `Par med… (${postName})` : pick.mode === 'bank' ? 'Modposten…' : 'Hører sammen med…'}
+            placeholder={pick.mode === 'post' ? `Par med… (${postName})` : pick.mode === 'bank' ? 'Modposten…' : 'Par med…'}
             searchPlaceholder="Søg dato, tekst eller beløb…" ariaLabel="Vælg den anden transaktion" emptyText="Ingen transaktion matcher – eller klik på den i listen"
             onChange={(id) => { if (id) completePick(pick, id); }} />
           <button className="btn sm ghost" onClick={() => setLinkPick(undefined)} aria-label="Annullér">✕</button>
@@ -769,7 +769,8 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
       ) : (
         <span className="row" style={{ gap: 10 }}>
           {addNote && <button className="add-memo" onClick={addNote}>+ Note</button>}
-          {mode && <button className={`add-memo ${mode.mode !== 'link' ? 'pair-btn' : ''}`} title={btnTitle} onClick={start}>{btnLabel}</button>}
+          {/* Overførsler, der skal parres, får en synlig knap; almindelige transaktioner viser den ved hover (som "+ Note"). */}
+          {mode && <button className={`add-memo ${mode.mode !== 'plain' ? 'pair-btn' : ''}`} title={btnTitle} onClick={start}>{btnLabel}</button>}
         </span>
       )}
     </>
@@ -920,7 +921,7 @@ export function linkTargetProps(pick: LinkPick | undefined, txId: string) {
   if (!other || !validPick(pick, other, txs)) return { className: 'link-disabled' };
   return {
     className: 'link-target',
-    title: pick.mode === 'link' ? 'Klik for at knytte til den valgte transaktion' : 'Klik for at parre med den valgte transaktion',
+    title: 'Klik for at parre med den valgte transaktion',
     onClickCapture: (ev: React.MouseEvent) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -949,7 +950,7 @@ export function LinkPickBanner() {
         ? <>⇄ Klik på det, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med på <b>{postName}</b> – står den som noget andet, flyttes den til {postName}.</>
         : pick.mode === 'bank'
           ? <>⇄ Klik på modposten til <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) – på en anden af dine konti.</>
-          : <>🔗 Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) hører sammen med – eller søg den frem i søgefeltet.</>}</span>
+          : <>⇄ Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med – eller søg den frem i søgefeltet.</>}</span>
       <span className="spacer" />
       <button className="btn sm" onClick={() => setLinkPick(undefined)}>Annullér (Esc)</button>
     </div>

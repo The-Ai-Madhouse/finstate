@@ -1,8 +1,9 @@
-import { pairItems, withSettle } from '../domain/settle';
+import { pairItems, withSettle, writeOffDifference } from '../domain/settle';
+import { linkTxs } from '../domain/links';
 import { useMemo } from 'react';
 import { ruleFromTx, splitLines } from '../domain/classify';
 import { buildEngine, type Engine } from '../domain/engine';
-import type { AppData, BankMapEntry, Classification, Rule, Split, Tx } from '../domain/types';
+import type { AppData, BankMapEntry, Classification, Period, Rule, Split, Tx } from '../domain/types';
 import { uid } from '../domain/util';
 import { update, useStore } from './store';
 
@@ -59,12 +60,19 @@ export function pairTxs(aId: string, bId: string) {
   });
 }
 
+/** Indtægt eller udgift for et beløb i en kategori (en "begge veje"-kategori følger fortegnet). */
+const plType = (d: AppData, categoryId: string, amount: number): 'income' | 'expense' => {
+  const c = d.categories.find((x) => x.id === categoryId);
+  return !c || c.kind === 'both' ? (amount > 0 ? 'income' : 'expense') : c.kind;
+};
+
 /**
  * Par to bevægelser på en post (fx et udlæg og tilbagebetalingen til "Jonas skylder mig"):
  * begge bliver "Intern → posten" (den anden flyttes over, hvis den stod som noget andet),
  * posten kommer med i periodens afstemning, og de to lægges i samme gruppe.
+ * Går det ikke op, kan resten afskrives som en kategori – ellers bliver den stående på posten.
  */
-export function pairOnPost(periodId: string, postId: string, aId: string, bId: string) {
+export function pairOnPost(period: Period, postId: string, aId: string, bId: string, writeOffCategoryId?: string) {
   update((d) => {
     const toPost = (t: Tx): Tx => {
       if (t.id !== aId && t.id !== bId) return t;
@@ -73,9 +81,67 @@ export function pairOnPost(periodId: string, postId: string, aId: string, bId: s
       return n;
     };
     let n: AppData = { ...d, txs: d.txs.map(toPost) };
-    n = withSettle(n, periodId, postId, true);
+    n = withSettle(n, period.id, postId, true);
     const into = (n.matches ?? []).find((m) => m.accountId === postId && m.keys.includes(`tx:${aId}`) && m.keys.length > 1)?.id;
-    return pairItems(n, postId, [`tx:${aId}`, `tx:${bId}`], into);
+    n = pairItems(n, postId, [`tx:${aId}`, `tx:${bId}`], into);
+    if (writeOffCategoryId) {
+      const m = n.matches.find((x) => x.accountId === postId && x.keys.includes(`tx:${aId}`));
+      if (m) n = writeOffDifference(n, buildEngine(n).ledger, m.id, writeOffCategoryId, period);
+    }
+    return n;
+  });
+}
+
+/**
+ * Par to almindelige transaktioner (fx et køb og en refusion, eller et udlæg og en indbetaling):
+ * begge bogføres i samme kategori, så kun resten tæller i regnskabet. De markeres som parret.
+ */
+export function pairPlain(aId: string, bId: string, categoryId: string) {
+  update((d) => {
+    const n: AppData = {
+      ...d,
+      txs: d.txs.map((t) => {
+        if (t.id !== aId && t.id !== bId) return t;
+        const x: Tx = { ...t, manual: { type: plType(d, categoryId, t.amount), categoryId } };
+        delete x.splits;
+        return x;
+      }),
+    };
+    return linkTxs(n, aId, bId);
+  });
+}
+
+/**
+ * Par to sider af en overførsel mellem dine konti. Er beløbene ikke ens (fx et gebyr), deles den største:
+ * det, der svarer til modposten, er intern overførsel – resten bogføres i den valgte kategori.
+ */
+export function pairBank(aId: string, bId: string, restCategoryId?: string) {
+  update((d) => {
+    const a = d.txs.find((t) => t.id === aId), b = d.txs.find((t) => t.id === bId);
+    if (!a || !b) return d;
+    const rest = a.amount + b.amount;
+    const big = Math.abs(a.amount) >= Math.abs(b.amount) ? a : b;
+    const small = big === a ? b : a;
+    return {
+      ...d,
+      txs: d.txs.map((t) => {
+        if (t.id !== aId && t.id !== bId) return t;
+        const other = t.id === aId ? b : a;
+        const n: Tx = { ...t, pairWith: other.id };
+        delete n.noAutoPair;
+        if (rest && restCategoryId && t.id === big.id) {
+          n.splits = [
+            { type: 'internal', targetAccountId: small.accountId, amount: -small.amount },
+            { type: plType(d, restCategoryId, rest), categoryId: restCategoryId, amount: rest },
+          ];
+          delete n.manual;
+        } else {
+          n.manual = { type: 'internal', targetAccountId: other.accountId };
+          delete n.splits;
+        }
+        return n;
+      }),
+    };
   });
 }
 

@@ -884,3 +884,28 @@ describe('afstemning pr. periode', () => {
     expect(inferred.periods.map((p) => p.settle)).toEqual([['acc-jonas'], []]);
   });
 });
+
+describe('ingen parring alene', () => {
+  it('dissolves a group when only one movement is left', async () => {
+    const { pairItems, unpair, settleState } = await import('./settle');
+    const { linkTxs, unlinkTx } = await import('./links');
+    const d0 = demoData();
+    const [a, b] = d0.txs;
+    let d = pairItems(d0, 'acc-jonas', [`tx:${a.id}`, `tx:${b.id}`]);
+    expect(d.matches).toHaveLength(1);
+    d = unpair(d, d.matches[0].id, `tx:${a.id}`);
+    expect(d.matches).toEqual([]); // b står ikke parret alene
+    // Flyttes den ene til en anden gruppe, opløses den gamle, hvis kun én er tilbage
+    const c = d0.txs[2];
+    d = pairItems(d0, 'acc-jonas', [`tx:${a.id}`, `tx:${b.id}`]);
+    d = pairItems(d, 'acc-jonas', [`tx:${b.id}`, `tx:${c.id}`]);
+    expect(d.matches.map((m) => m.keys.length)).toEqual([2]);
+    // En gruppe, hvor den anden er slettet, tæller ikke som parret
+    const gone = { ...d0, matches: [{ id: 'm', accountId: 'acc-jonas', keys: ['tx:findes-ikke', `tx:${d0.txs.find((t) => t.date === '2025-08-20' && t.text === 'MobilePay Jonas Lind')!.id}`] }] };
+    expect(settleState(gone, buildEngine(gone).ledger, 'acc-jonas', gone.periods[0]).groups).toEqual([]);
+    // Hører-sammen/parrede transaktioner: den sidste mister også sin parring
+    let l = linkTxs(d0, a.id, b.id);
+    l = unlinkTx(l, a.id);
+    expect(l.txs.filter((t) => t.link)).toEqual([]);
+  });
+});

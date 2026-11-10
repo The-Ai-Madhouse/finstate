@@ -696,3 +696,12 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 /* Par-knappen på overførsler skal kunne ses – den er handlingen, ikke en note */
 .tx-notes .add-memo.pair-btn { opacity: 1; color: var(--accent); font-weight: 600; }
 .link-disabled { opacity: 0.45; }
+
+/* Par-vinduet */
+.modal.pair-modal { width: min(640px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; }
+.pair-line { gap: 10px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); flex-wrap: nowrap; }
+.pair-sum { gap: 10px; padding: 8px 8px 4px; border-top: 1.5px solid var(--ink); margin-top: 2px; }
+.pair-choice { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.pair-choice p { margin: 0; }
+.pair-choice label.row { gap: 8px; cursor: pointer; }
+.pair-choice .combo { max-width: 360px; }

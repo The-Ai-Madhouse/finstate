@@ -8,7 +8,7 @@ import { textMatches } from '../../domain/txfilter';
 import { transitName } from '../../domain/ledger';
 import { carriedTransit, transferInfo, transitCandidates, type CarriedTransit } from '../../domain/transfers';
 import { addDays, dayDiff } from '../../domain/util';
-import { pairTxs, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
+import { pairBank, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { AccountSelect, ClassEditor, Empty, InfoBox, Money, SearchCombo, isComplete } from '../components/common';
 import { SettleOverview, setPostSettle } from '../components/SettlePanel';
@@ -235,11 +235,18 @@ function PairPicker({ t, period }: { t: Tx; period: Period }) {
       {exact.map((c) => (
         <span key={c.id} className="row" style={{ gap: 6 }}>
           <span className="ink2">Forslag: {acc(c.accountId)} {dateShort(c.date)} "{c.text}"</span>
-          <button className="btn sm primary" onClick={() => pairTxs(t.id, c.id)}>Par</button>
+          <button className="btn sm primary" onClick={() => pairBank(t.id, c.id)}>Par</button>
         </span>
       ))}
       <SearchCombo className="sm" options={options} value={undefined} placeholder={exact.length ? 'Eller find en anden modpost…' : 'Find modposten…'} searchPlaceholder="Søg dato, konto eller tekst…"
-        ariaLabel="Find modpost" emptyText="Ingen transaktion matcher" onChange={(id) => id && pairTxs(t.id, id)} />
+        ariaLabel="Find modpost" emptyText="Ingen transaktion matcher"
+        onChange={(id) => {
+          if (!id) return;
+          // Samme beløb: par med det samme. Andet beløb: vis parringen, så resten (fx et gebyr) kan placeres.
+          const o = e.txById.get(id);
+          if (o && o.amount === -t.amount) pairBank(t.id, id);
+          else useStore.getState().setPairDraft({ pick: { txId: t.id, mode: 'bank' }, otherId: id });
+        }} />
     </div>
   );
 }

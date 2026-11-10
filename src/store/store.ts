@@ -35,6 +35,9 @@ interface State {
   /** "Hører sammen med": transaktionen, man er ved at knytte til en anden (klik på den anden i listen). */
   linkPick?: LinkPick;
   setLinkPick: (pick?: LinkPick) => void;
+  /** Valgt par, der venter på at blive bekræftet (og evt. hvor resten skal hen). */
+  pairDraft?: { pick: LinkPick; otherId: string };
+  setPairDraft: (draft?: { pick: LinkPick; otherId: string }) => void;
   /** Gå til Aktiver & passiver med en post foldet ud. */
   balanceFocus?: string;
   showPost: (accountId: string) => void;
@@ -44,9 +47,9 @@ interface State {
 
 /**
  * Vælg en anden transaktion (søg eller klik i listen):
- *  link = "hører sammen med" · post = par på en afstemt post (fx udlæg ↔ tilbagebetaling) · bank = find modposten til en overførsel mellem dine konti
+ *  plain = almindelige transaktioner (fx udlæg og indbetaling) · post = par på en afstemt post (fx udlæg ↔ tilbagebetaling) · bank = find modposten til en overførsel mellem dine konti
  */
-export type LinkPick = { txId: string; mode: 'link' | 'post' | 'bank'; postId?: string; periodId?: string };
+export type LinkPick = { txId: string; mode: 'plain' | 'post' | 'bank'; postId?: string; periodId?: string };
 
 export type LedgerFilter = TxFilter;
 export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status: 'all', withNote: false, sort: 'date-asc' };
@@ -91,6 +94,7 @@ export const useStore = create<State>()(
       showTransfers: (transferFocus) => set({ view: 'transfers', transferFocus }),
       clearTransferFocus: () => set({ transferFocus: undefined }),
       setLinkPick: (linkPick) => set({ linkPick }),
+      setPairDraft: (pairDraft) => set({ pairDraft }),
       showPost: (balanceFocus) => set({ view: 'balance', balanceFocus }),
       clearBalanceFocus: () => set({ balanceFocus: undefined }),
       setPeriod: (periodId) => set({ periodId }),

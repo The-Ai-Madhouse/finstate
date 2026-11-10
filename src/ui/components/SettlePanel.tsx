@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
 import { isSettled, pairItems, settleState, unpair, withSettle, writeOffDifference, type SettleItem } from '../../domain/settle';
-import { acceptLinkDifference, linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
+import { linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { CategoryCombo, Money, InfoBox, SearchCombo } from './common';
+import { CategoryCombo, Money, InfoBox, SearchCombo, categoryLabel } from './common';
 
 /**
  * Afstemning af en post, der følger overførsler (udlæg, tilgodehavender, gæld til personer):
@@ -80,7 +80,7 @@ export function SettlePanel({ acc }: { acc: Account }) {
               <>
                 <span>Valgt: {selItems.length} · sum <Money v={selSum} decimals signed /></span>
                 {selSum === 0 ? <span className="chip user">går op</span> : <span className="chip review">difference {kr(Math.abs(selSum))}</span>}
-                <button className="btn sm primary" onClick={() => pair([...sel])}>Par valgte</button>
+                <button className="btn sm primary" disabled={selItems.length < 2} title={selItems.length < 2 ? 'Vælg mindst to – eller føj den til en gruppe herunder' : undefined} onClick={() => pair([...sel])}>Par valgte</button>
                 {notDone.length > 0 && <span className="muted">eller føj til en gruppe herunder</span>}
               </>
             ) : <span className="muted">Sæt flueben ved det, der hører sammen.</span>}
@@ -172,8 +172,8 @@ export function SettleOverview() {
       </div>
       <InfoBox label="Hvad kan afstemmes?">
         Her samles det, du har valgt at afstemme: <b>poster</b>, der følger dine overførsler (fx "Jonas skylder mig"), hvor du parrer et udlæg med tilbagebetalingen –
-        og <b>transaktioner, der hører sammen</b>, som du har knyttet sammen i Kategorisér (fx et køb og en refusion). Du ser med det samme, om det går op;
-        gør det ikke, kan du afskrive differencen.
+        og <b>parrede transaktioner</b>, som du har parret i Kategorisér (fx et udlæg og indbetalingen). Du ser med det samme, om det går op;
+        gør det ikke, vælger du, hvor resten hører hjemme.
       </InfoBox>
 
       <div className="section-label">Poster</div>
@@ -206,22 +206,29 @@ export function SettleOverview() {
         </table>
       )}
 
-      <div className="section-label" style={{ marginTop: 16 }}>Transaktioner, der hører sammen</div>
+      <div className="section-label" style={{ marginTop: 16 }}>Parrede transaktioner</div>
       {!groups.length
-        ? <div className="small muted">Ingen endnu. Brug "🔗 Hører sammen med…" ved en transaktion i Kategorisér – fx et køb og refusionen.</div>
+        ? <div className="small muted">Ingen endnu. Brug "⇄ Par…" ved en transaktion i Kategorisér – fx et udlæg og indbetalingen.</div>
         : <div className="col" style={{ gap: 6 }}>{groups.map((g) => <LinkGroupCard key={g.id} g={g} />)}</div>}
     </div>
   );
 }
 
-/** Én gruppe af transaktioner, der hører sammen: summen, og om differencen er afskrevet. */
+/** Parrede transaktioner (fx et udlæg og indbetalingen): summen, og hvilken kategori resten hører hjemme i. */
 function LinkGroupCard({ g }: { g: LinkGroup }) {
-  const data = useStore((s) => s.data);
+  const e = useEngine();
   const update = useStore((s) => s.update);
   const showTx = useStore((s) => s.showTx);
-  const [note, setNote] = useState(g.note ?? '');
-  const acc = (id: string) => data.accounts.find((a) => a.id === id)?.name ?? '';
-  const ok = g.sum === 0 || g.accepted;
+  const acc = (id: string) => e.data.accounts.find((a) => a.id === id)?.name ?? '';
+  // Resten hører hjemme i den kategori, de parrede står i – er de forskellige, vælger man én for dem alle.
+  const cats = new Set(g.txs.map((t) => e.resolved.get(t.id)?.lines.find((l) => l.categoryId)?.categoryId ?? ''));
+  const restCat = cats.size === 1 ? [...cats][0] || undefined : undefined;
+  const placeRest = (categoryId: string) => update((d) => {
+    const cat = d.categories.find((c) => c.id === categoryId);
+    const ids = new Set(g.txs.map((t) => t.id));
+    return { ...d, txs: d.txs.map((t) => (ids.has(t.id) ? { ...t, manual: { type: !cat || cat.kind === 'both' ? (t.amount > 0 ? 'income' : 'expense') : cat.kind, categoryId }, splits: undefined } : t)) };
+  });
+  const ok = g.sum === 0 || !!restCat;
   return (
     <div className={`xfer-item ${ok ? '' : 'missing'}`}>
       {g.txs.map((t) => (
@@ -231,22 +238,21 @@ function LinkGroupCard({ g }: { g: LinkGroup }) {
           <button className="linkish ellipsis" style={{ maxWidth: 380 }} title="Åbn i Kategorisér" onClick={() => showTx(t.id)}>{t.text}</button>
           <span className="spacer" />
           <Money v={t.amount} decimals colored />
-          <button className="btn sm ghost" title="Tag ud af gruppen" aria-label={`Tag ${t.text} ud af gruppen`} onClick={() => update((d) => unlinkTx(d, t.id))}>✕</button>
+          <button className="btn sm ghost" title="Ophæv parringen for denne (er der kun én tilbage, ophæves den også)" aria-label={`Ophæv ${t.text}`} onClick={() => update((d) => unlinkTx(d, t.id))}>✕</button>
         </div>
       ))}
       <div className="row small" style={{ gap: 8, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
         <span>I alt <b><Money v={g.sum} decimals signed /></b></span>
         {g.sum === 0 ? <span className="chip user">✓ Går op</span>
-          : g.accepted ? <span className="chip user" title="Differencen står allerede i regnskabet under transaktionernes kategorier">✓ Difference afskrevet</span>
-          : <span className="chip review">Difference {kr(Math.abs(g.sum))}</span>}
-        {g.sum !== 0 && (
-          <input className="sm grow" style={{ minWidth: 160 }} value={note} placeholder="Note – fx hvorfor det ikke går op" aria-label="Note til gruppen"
-            onChange={(ev) => setNote(ev.target.value)} onBlur={() => note !== (g.note ?? '') && update((d) => ({ ...d, linkGroups: { ...(d.linkGroups ?? {}), [g.id]: { ...(d.linkGroups?.[g.id] ?? {}), note: note.trim() || undefined } } }))} />
-        )}
+          : restCat ? <span className="chip user">Resten {kr(Math.abs(g.sum))} → {categoryLabel(e.data.categories, restCat)}</span>
+          : <span className="chip review">Resten {kr(Math.abs(g.sum))} er ikke placeret</span>}
         <span className="spacer" />
-        {g.sum !== 0 && (g.accepted
-          ? <button className="btn sm ghost" onClick={() => update((d) => acceptLinkDifference(d, g.id, false))}>Fortryd afskrivning</button>
-          : <button className="btn sm" title="Differencen står allerede i regnskabet under transaktionernes kategorier – her markerer du blot, at det er i orden" onClick={() => update((d) => acceptLinkDifference(d, g.id, true, note.trim() || undefined))}>Afskriv differencen</button>)}
+        {g.sum !== 0 && (
+          <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+            <span className="ink2">{restCat ? 'Flyt resten til' : 'Hvor hører resten hjemme?'}</span>
+            <CategoryCombo className="sm" value={restCat} onChange={(id) => id && placeRest(id)} primaryKind={g.sum < 0 ? 'expense' : 'income'} placeholder="vælg kategori" />
+          </span>
+        )}
       </div>
     </div>
   );

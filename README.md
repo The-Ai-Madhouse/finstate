@@ -22,8 +22,8 @@ npm test         # tests af regnskabsmotoren
 Start altid med en periode (H1, H2, helår eller egne datoer) øverst i menuen. Kategoritræet er fælles for alle perioder.
 
 1. **Importér** CSV fra hver konto (overlap er ufarligt – dubletter genkendes på hash). Importerede filer kan ses og fjernes igen.
-2. **Kategorisér** – gennemgang eller grupperet, med faste filtre (tekst/noter, beløb, dato, konto, kategori, type) og sortering; "Lignende" giver samme kategori til flere på én gang, "Opdel" deler et beløb.
-3. **Overførsler** – interne overførsler parres på tværs af konti; direkte overførsler til en post (fx en person) parres med det, de hører sammen med – går det ikke op, kan differencen afskrives.
+2. **Kategorisér** – gennemgang eller grupperet, med faste filtre (tekst/noter, beløb, dato, konto, kategori, type) og sortering; "Lignende" giver samme kategori til flere på én gang, "Opdel" deler et beløb, og "⇄ Par" parrer to transaktioner (fx et udlæg og indbetalingen) – går de ikke op, vælger man, hvor resten hører hjemme.
+3. **Overførsler** – interne overførsler parres på tværs af konti. Under **Afstemning** ses det, du har valgt at afstemme i perioden: poster (fx en person) og parrede transaktioner – og om det går op.
 4. **Aktiver & passiver** – alle poster i ét samlet billede. Hver post har en valgfri egen type og enten
    *følger overførsler* eller *tastes selv*. Poster og kommentarer kopieres fra forrige periode.
 5. **Regnskab** – resultat & balance med sammenligning; klik på et beløb for at se, hvad det består af; CSV-eksport.

@@ -94,7 +94,8 @@ export function settleState(data: AppData, ledger: Ledger, accountId: string, pe
       const its = items.filter((i) => i.matchId === match.id);
       return { match, items: its, sum: its.reduce((s, i) => s + i.amount, 0) };
     })
-    .filter((g) => g.items.length > 0)
+    // En parring kræver mindst to (fx hvis den anden er slettet, står den tilbageværende som uparret).
+    .filter((g) => g.items.length > 1)
     .sort((a, b) => (a.items[0].date < b.items[0].date ? -1 : 1));
   const open = items.filter((i) => !i.matchId || !groups.some((g) => g.match.id === i.matchId));
   return { items, groups, open, openSum: open.reduce((s, i) => s + i.amount, 0), suggestions: suggestPairs(open) };
@@ -124,13 +125,15 @@ export function pairItems(d: AppData, accountId: string, keys: string[], intoMat
   } else {
     matches = [...matches, { id: uid('match'), accountId, keys: [...keys] }];
   }
-  return { ...d, matches: matches.filter((m) => m.keys.length > 0) };
+  // Ingen parring alene: grupper, der kun har én tilbage, opløses.
+  return { ...d, matches: matches.filter((m) => m.keys.length > 1) };
 }
 
 export function unpair(d: AppData, matchId: string, key?: string): AppData {
   const matches = (d.matches ?? [])
     .map((m) => (m.id !== matchId ? m : key ? { ...m, keys: m.keys.filter((k) => k !== key) } : { ...m, keys: [] }))
-    .filter((m) => m.keys.length > 0);
+    // Står der kun én tilbage, er den ikke længere parret med noget – gruppen opløses.
+    .filter((m) => m.keys.length > 1);
   return { ...d, matches };
 }
 

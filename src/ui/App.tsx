@@ -13,6 +13,7 @@ import { SettingsView } from './views/SettingsView';
 import { SlidesView } from './views/SlidesView';
 import { StatementView } from './views/StatementView';
 import { TransfersView } from './views/TransfersView';
+import { PairDialog } from './components/PairDialog';
 
 /** Arbejdstrin: her skal brugeren gøre noget → nummer, der bliver til ✓. */
 const WORK: { id: View; label: string; n: number; steps: string[] }[] = [
@@ -44,6 +45,7 @@ export function App() {
     : 0;
   return (
     <div className="app">
+      <PairDialog />
       <nav className="nav" aria-label="Hovedmenu">
         <div className="brand">◐ Finstate <small>lokalt & privat</small></div>
         <StatementSwitcher />
