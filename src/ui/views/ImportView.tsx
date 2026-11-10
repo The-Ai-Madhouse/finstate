@@ -13,7 +13,7 @@ import { useStore } from '../../store/store';
 import { usePeriod } from '../../store/actions';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { importCoverage } from '../../domain/engine';
-import { importFiles, removeImport } from '../../domain/imports';
+import { importFiles, removeImport, setImportRange, type ImportFile } from '../../domain/imports';
 import { dateDa } from '../../domain/format';
 import { AccountSelect, Empty, Money, SearchCombo, InfoBox } from '../components/common';
 
@@ -23,6 +23,9 @@ interface Pending {
   sheet: ParsedSheet;
   mapping: Partial<ColumnMapping>;
   accountId?: string;
+  /** Perioden filen dækker (standard: første til sidste transaktion i filen). */
+  from?: string;
+  to?: string;
 }
 
 export function ImportView() {
@@ -60,8 +63,8 @@ function CoverageCard() {
             {cov.map((c) => (
               <tr key={c.accountId}>
                 <td>{c.name}</td>
-                <td>{c.first ?? '–'}</td>
-                <td>{c.last ?? '–'}</td>
+                <td>{c.first ? dateDa(c.first) : '–'}</td>
+                <td>{c.last ? dateDa(c.last) : '–'}</td>
                 <td>
                   {c.coversStart && c.coversEnd ? <span className="chip user">✓ Ja</span>
                     : c.accepted ? (
@@ -169,13 +172,22 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
   const [setupSecurities, setSetupSecurities] = useState(true);
   const complete = isCompleteMapping(p.mapping);
   const [showCols, setShowCols] = useState(!complete);
-  const preview = complete && p.accountId ? buildTxs(p.sheet, p.mapping as ColumnMapping, p.accountId) : undefined;
+  const built = complete && p.accountId ? buildTxs(p.sheet, p.mapping as ColumnMapping, p.accountId) : undefined;
+  const fileDates = built?.txs.map((t) => t.date).sort() ?? [];
+  const fileFirst = fileDates[0];
+  const fileLast = fileDates[fileDates.length - 1];
+  const from = p.from ?? fileFirst;
+  const to = p.to ?? fileLast;
+  const rangeBad = !!from && !!to && from > to;
+  // Kun transaktioner i den valgte periode importeres.
+  const preview = built && { ...built, txs: built.txs.filter((t) => (!from || t.date >= from) && (!to || t.date <= to)) };
+  const outside = built && preview ? built.txs.length - preview.txs.length : 0;
+  const period = usePeriod();
   const existingById = new Map(data.txs.map((t) => [t.id, t]));
   const fresh = preview?.txs.filter((t) => !existingById.has(t.id)) ?? [];
   // Allerede importerede transaktioner, som filen kan give en kommentar.
   const noteFills = preview?.txs.filter((t) => t.note && existingById.has(t.id) && !existingById.get(t.id)!.note) ?? [];
   const chain = preview ? orderChain(preview.txs) : undefined;
-  const dates = preview?.txs.map((t) => t.date).sort() ?? [];
   const hint = accountHint(p.sheet, p.mapping);
   const useBank = data.settings.useBankCategories !== false;
   const hasBankCats = p.mapping.category !== undefined || p.mapping.subcategory !== undefined;
@@ -202,7 +214,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
       let next: typeof d = {
         ...d,
         txs: [...d.txs.map((t) => (notes.has(t.id) ? { ...t, note: notes.get(t.id) } : t)), ...fresh],
-        imports: [...(d.imports ?? []), { id: uid('imp'), fileName: p.fileName, accountId, importedAt: new Date().toISOString(), txIds: preview.txs.map((t) => t.id) }],
+        imports: [...(d.imports ?? []), { id: uid('imp'), fileName: p.fileName, accountId, importedAt: new Date().toISOString(), txIds: preview.txs.map((t) => t.id), from, to }],
         importProfiles: { ...d.importProfiles, [p.sheet.headerSignature]: p.mapping as ColumnMapping },
       };
       if (broker && setupSecurities) next = setupDepot(next, accountId, periodId);
@@ -212,7 +224,9 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
     const dup = preview.txs.length - fresh.length;
     onDone(
       `${p.fileName}: ${fresh.length} nye transaktioner importeret til ${name}` +
+        (from && to ? ` for ${dateDa(from)} – ${dateDa(to)}` : '') +
         (dup ? ` (${dup} fandtes allerede)` : '') +
+        (outside ? `, ${outside} uden for perioden sprunget over` : '') +
         (noteFills.length ? `, ${noteFills.length} fik din kommentar tilføjet` : '') +
         '. Næste trin: Kategorisér.',
     );
@@ -313,7 +327,24 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
         </div>
       )}
 
-      <div className="section-label">3 · Importér</div>
+      {built && fileFirst && (
+        <>
+          <div className="section-label">3 · Hvilken periode dækker filen?</div>
+          <div className="row" style={{ marginBottom: 16, alignItems: 'flex-end' }}>
+            <label className="field">Fra<input type="date" value={from ?? ''} onChange={(e) => onChange({ ...p, from: e.target.value || undefined })} aria-label="Filen dækker fra" /></label>
+            <label className="field">Til<input type="date" value={to ?? ''} onChange={(e) => onChange({ ...p, to: e.target.value || undefined })} aria-label="Filen dækker til" /></label>
+            {(p.from || p.to) && <button className="btn sm ghost" onClick={() => onChange({ ...p, from: undefined, to: undefined })}>Hele filen ({dateDa(fileFirst)} – {dateDa(fileLast)})</button>}
+            {period && (from !== period.start || to !== period.end) && <button className="btn sm ghost" onClick={() => onChange({ ...p, from: period.start, to: period.end })}>Hele {period.name}</button>}
+            <InfoBox label="Hvorfor vælge periode?">
+              Vælg den periode, du eksporterede fra netbanken – også selvom der ikke var bevægelser de første eller sidste dage.
+              Så ved Finstate, at dine data dækker hele perioden, og advarer ikke om manglende data. Transaktioner uden for perioden importeres ikke.
+            </InfoBox>
+          </div>
+          {rangeBad && <div className="banner warn" style={{ marginBottom: 12 }}>"Fra" skal ligge før "Til".</div>}
+        </>
+      )}
+
+      <div className="section-label">{built && fileFirst ? 4 : 3} · Importér</div>
       {!complete && <div className="banner warn">Vælg mindst dato-, tekst- og beløbskolonne.</div>}
       {complete && !p.accountId && <div className="banner warn">Vælg hvilken konto filen tilhører (trin 1).</div>}
       {preview && (
@@ -321,7 +352,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
           <span className="chip user">{fresh.length} nye</span>
           {preview.txs.length - fresh.length > 0 && <span className="chip">{preview.txs.length - fresh.length} findes allerede</span>}
           {noteFills.length > 0 && <span className="chip user">{noteFills.length} får din kommentar</span>}
-          {dates.length > 0 && <span className="chip">{dates[0]} → {dates[dates.length - 1]}</span>}
+          {outside > 0 && <span className="chip" title="Uden for den valgte periode – importeres ikke">{outside} uden for perioden</span>}
           {p.mapping.balance === undefined ? (
             <span className="chip review">Ingen saldo – kan ikke afstemmes automatisk</span>
           ) : chain && chain.breaks.length ? (
@@ -331,7 +362,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
           )}
           {preview.errors.length > 0 && <span className="chip review" title={preview.errors.slice(0, 5).map((e) => `Række ${e.row}: ${e.reason}`).join('\n')}>{preview.errors.length} rækker sprunget over</span>}
           <span className="spacer" />
-          <button className="btn primary" disabled={!fresh.length && !noteFills.length} onClick={doImport}>
+          <button className="btn primary" disabled={rangeBad || (!fresh.length && !noteFills.length)} onClick={doImport}>
             {fresh.length ? `Importér ${fresh.length} transaktioner` : `Tilføj ${noteFills.length} kommentarer`}
           </button>
         </div>
@@ -343,29 +374,33 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
 function AccountsSummary() {
   const e = useEngine();
   const update = useStore((s) => s.update);
-  const banks = e.data.accounts.filter((a) => a.kind === 'bank');
+  const period = usePeriod()!;
+  const banks = e.data.accounts.filter((a) => a.kind === 'bank' && (period.accountIds ? period.accountIds.includes(a.id) : !a.archived));
+  const inP = (d: string) => d >= period.start && d <= period.end;
   return (
     <div className="card">
-      <h2>Importerede data</h2>
+      <h2>Importerede data i {period.name}</h2>
       {!e.data.txs.length ? <Empty>Ingen transaktioner endnu.</Empty> : (
         <table>
-          <thead><tr><th>Konto</th><th className="num">Transaktioner</th><th>Fra</th><th>Til</th><th className="num">Seneste saldo</th><th>Saldokæde</th><th /></tr></thead>
+          <thead><tr><th>Konto</th><th className="num">Transaktioner</th><th>Fra</th><th>Til</th><th className="num">Saldo</th><th>Saldokæde</th><th /></tr></thead>
           <tbody>
             {banks.map((a) => {
               const c = e.ledger.chains.get(a.id)!;
-              const o = c.ordered;
+              const all = c.ordered;
+              const o = all.filter((t) => inP(t.date));
+              const breaks = c.breaks.filter((b) => inP(b.date));
               return (
                 <tr key={a.id}>
                   <td>{a.name}</td>
-                  <td className="num">{o.length}</td>
-                  <td>{o[0]?.date ?? '–'}</td>
-                  <td>{o[o.length - 1]?.date ?? '–'}</td>
+                  <td className="num">{o.length}{all.length > o.length && <div className="small muted">{all.length} i alt</div>}</td>
+                  <td>{o[0] ? dateDa(o[0].date) : '–'}</td>
+                  <td>{o.length ? dateDa(o[o.length - 1].date) : '–'}</td>
                   <td className="num">{o.length && o[o.length - 1].balance !== undefined ? <Money precise v={o[o.length - 1].balance!} /> : '–'}</td>
-                  <td>{!o.length ? '–' : c.breaks.length ? <span className="chip review" title={c.breaks.map((b) => `${b.date}: ${kr(b.diff)}`).join('\n')}>{c.breaks.length} brud</span> : <span className="chip user">OK</span>}</td>
+                  <td>{!o.length ? '–' : breaks.length ? <span className="chip review" title={breaks.map((b) => `${b.date}: ${kr(b.diff)}`).join('\n')}>{breaks.length} brud</span> : <span className="chip user">OK</span>}</td>
                   <td className="num">
-                    {o.length > 0 && (
-                      <button className="btn sm ghost danger" onClick={() => {
-                        if (confirm(`Slet alle ${o.length} transaktioner på ${a.name}? Dine regler bevares, men manuelle valg på disse transaktioner forsvinder.`))
+                    {all.length > 0 && (
+                      <button className="btn sm ghost danger" title="Sletter kontoens transaktioner i alle perioder" onClick={() => {
+                        if (confirm(`Slet alle ${all.length} transaktioner på ${a.name} – i alle perioder, ikke kun ${period.name}? Dine regler bevares, men manuelle valg på disse transaktioner forsvinder.`))
                           update((d) => ({ ...d, txs: d.txs.filter((t) => t.accountId !== a.id), imports: (d.imports ?? []).filter((r) => r.accountId !== a.id) }));
                       }}>Slet</button>
                     )}
@@ -424,23 +459,40 @@ function ImportedFiles() {
   const update = useStore((s) => s.update);
   const [open, setOpen] = useState<string>();
   const [asking, setAsking] = useState<string>();
-  const files = importFiles(data);
-  if (!files.length) return null;
+  const period = usePeriod()!;
+  const [showOther, setShowOther] = useState(false);
+  const all = importFiles(data);
+  if (!all.length) return null;
+  // Kun filer, der dækker noget af det aktuelle financial statement – resten kan vises.
+  const relevant = (f: ImportFile) => !!f.from && !!f.to && f.from <= period.end && f.to >= period.start;
+  const other = all.filter((f) => !relevant(f));
+  const files = showOther ? all : all.filter(relevant);
   const accName = (id: string) => data.accounts.find((a) => a.id === id)?.name ?? '(slettet konto)';
   const when = (iso: string) => { const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleString('da-DK', { dateStyle: 'medium', timeStyle: 'short' }); };
   return (
     <div className="card">
-      <h2>Importerede filer</h2>
+      <div className="card-head">
+        <h2 className="grow">Importerede filer til {period.name}</h2>
+        {other.length > 0 && (
+          <label className="row small ink2"><input type="checkbox" checked={showOther} onChange={(ev) => setShowOther(ev.target.checked)} /> Vis også {other.length} fra andre perioder</label>
+        )}
+      </div>
       <InfoBox>Klik på en fil for at se indholdet. Fjerner du en fil, slettes dens transaktioner – undtagen dem, som en anden af dine filer også indeholder.</InfoBox>
+      {!files.length ? <Empty>Ingen importerede filer dækker {period.name} endnu.</Empty> : (
       <table>
-        <thead><tr><th>Fil</th><th>Konto</th><th>Importeret</th><th>Dækker</th><th className="num">Transaktioner</th><th /></tr></thead>
+        <thead><tr><th>Periode</th><th>Konto</th><th>Importeret</th><th className="num">Transaktioner</th><th /></tr></thead>
         <tbody>
           {files.map((f) => [
             <tr key={f.id} className={`click ${open === f.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpen(open === f.id ? undefined : f.id); }}>
-              <td><span className={`caret ${open === f.id ? 'open' : ''}`} aria-hidden>›</span> {f.legacy ? <span className="muted" title="Importeret før Finstate huskede filnavne">{f.fileName}</span> : f.fileName}</td>
+              <td style={{ maxWidth: 360 }}>
+                <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                  <span className={`caret ${open === f.id ? 'open' : ''}`} aria-hidden>›</span>
+                  <span className={relevant(f) ? '' : 'muted'}>{f.from ? `${dateDa(f.from)} – ${dateDa(f.to!)}` : '–'}</span>
+                </div>
+                <div className="small muted ellipsis file-sub" title={f.legacy ? 'Importeret før Finstate huskede filnavne' : f.fileName}>{f.fileName}</div>
+              </td>
               <td>{accName(f.accountId)}</td>
               <td className="small">{when(f.importedAt)}</td>
-              <td className="small">{f.first ? `${f.first} → ${f.last}` : '–'}</td>
               <td className="num">{f.txs.length}{f.onlyHere < f.txs.length && <div className="small muted">{f.txs.length - f.onlyHere} også i andre filer</div>}</td>
               <td className="num">
                 {asking === f.id ? (
@@ -454,7 +506,9 @@ function ImportedFiles() {
             </tr>,
             open === f.id && (
               <tr key={`${f.id}-c`} className="drawer-row">
-                <td colSpan={6}>
+                <td colSpan={5}>
+                  <div className="drawer">
+                  {!f.legacy && <FileRange f={f} />}
                   <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
                     <table className="small">
                       <thead><tr><th>Dato</th><th>Tekst</th><th>Bankens kategori</th><th>Kommentar</th><th className="num">Beløb</th><th className="num">Saldo</th></tr></thead>
@@ -472,12 +526,28 @@ function ImportedFiles() {
                       </tbody>
                     </table>
                   </div>
+                  </div>
                 </td>
               </tr>
             ),
           ])}
         </tbody>
       </table>
+      )}
+    </div>
+  );
+}
+
+/** Perioden en importeret fil dækker – kan rettes bagefter (bruges til at vurdere, om data dækker regnskabet). */
+function FileRange({ f }: { f: ImportFile }) {
+  const update = useStore((s) => s.update);
+  const set = (from?: string, to?: string) => update((d) => setImportRange(d, f.id, from, to));
+  return (
+    <div className="row small" style={{ marginBottom: 10, alignItems: 'flex-end' }}>
+      <label className="field">Filen dækker fra<input type="date" value={f.from ?? ''} onChange={(e) => set(e.target.value || undefined, f.declared ? f.to : undefined)} aria-label="Filen dækker fra" /></label>
+      <label className="field">til<input type="date" value={f.to ?? ''} onChange={(e) => set(f.declared ? f.from : undefined, e.target.value || undefined)} aria-label="Filen dækker til" /></label>
+      {f.declared && f.first && (f.from !== f.first || f.to !== f.last) && <button className="btn sm ghost" onClick={() => set(undefined, undefined)}>Brug transaktionernes datoer ({dateDa(f.first)} – {dateDa(f.last!)})</button>}
+      <span className="muted">Datoer uden bevægelser tæller også med, når Finstate vurderer, om dine data dækker perioden.</span>
     </div>
   );
 }

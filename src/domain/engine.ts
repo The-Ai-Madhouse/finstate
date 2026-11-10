@@ -1,3 +1,4 @@
+import { coveredRange } from './imports';
 import { compareFor, elapsedEnd, inProgress, yearPeriod } from './periods';
 import { migrateModel, migrateOutlays } from './migrate';
 import { NEEDS_REVIEW, resolveAll, type Resolved } from './classify';
@@ -72,7 +73,8 @@ export function periodChecks(e: Engine, p: Period): Check[] {
       out.push({ id: `import-${acc.id}`, level: 'warn', title: `${acc.name}: ingen transaktioner importeret`, view: 'import' });
       continue;
     }
-    const last = accTx[accTx.length - 1].date;
+    // Seneste dato med data: sidste transaktion – eller senere, hvis en fil er angivet at dække længere.
+    const last = coveredRange(data, acc.id).last ?? accTx[accTx.length - 1].date;
     // Et igangværende år skal kun have data frem til i dag.
     const until = elapsedEnd(p);
     if (last < until && dayDiff(last, until) > 14 && !p.coverageOk?.includes(acc.id)) {
@@ -190,12 +192,7 @@ export function importCoverage(data: AppData, p: Period, today = new Date().toIS
   return data.accounts
     .filter((a) => a.kind === 'bank' && !a.archived)
     .map((a) => {
-      let first: string | undefined, last: string | undefined;
-      for (const t of data.txs) {
-        if (t.accountId !== a.id) continue;
-        if (!first || t.date < first) first = t.date;
-        if (!last || t.date > last) last = t.date;
-      }
+      const { first, last } = coveredRange(data, a.id);
       return {
         accountId: a.id,
         name: a.name,

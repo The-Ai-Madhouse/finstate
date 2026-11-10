@@ -698,3 +698,18 @@ describe('opdeling større end beløbet', () => {
     expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
   });
 });
+
+describe('periode for en importeret fil', () => {
+  it('counts quiet days at the end of the export as covered', async () => {
+    const { importCoverage } = await import('./engine');
+    const { setImportRange, importFiles } = await import('./imports');
+    const d = demoData();
+    const later = { id: 'x', name: '2026', start: '2026-01-01', end: '2026-12-31' };
+    expect(importCoverage(d, later, '2026-08-15').find((c) => c.accountId === 'acc-loen')!.coversEnd).toBe(false);
+    const d2 = setImportRange(d, 'imp-acc-loen', '2025-01-01', '2026-08-10');
+    expect(importCoverage(d2, later, '2026-08-15').find((c) => c.accountId === 'acc-loen')!.coversEnd).toBe(true);
+    const f = importFiles(d2).find((x) => x.id === 'imp-acc-loen')!;
+    expect([f.from, f.to, f.declared]).toEqual(['2025-01-01', '2026-08-10', true]);
+    expect(importFiles(d).find((x) => x.id === 'imp-acc-loen')!.declared).toBe(false);
+  });
+});

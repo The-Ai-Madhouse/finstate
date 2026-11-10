@@ -595,3 +595,6 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 .cat-top { border-top: 1px solid var(--line); padding: 6px 0; }
 .cat-sub { margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--line); }
 .cat-line { margin-top: 4px; flex-wrap: nowrap; }
+
+/* Importerede filer: perioden som titel, filnavnet diskret nedenunder */
+.file-sub { max-width: 340px; padding-left: 18px; }

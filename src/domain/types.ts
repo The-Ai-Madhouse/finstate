@@ -101,6 +101,9 @@ export interface ImportRecord {
   accountId: string;
   importedAt: string;
   txIds: string[];
+  /** Perioden filen dækker (fx bankens eksportperiode) – også dage uden bevægelser. Standard: første og sidste transaktion. */
+  from?: string;
+  to?: string;
 }
 
 export interface Rule {
