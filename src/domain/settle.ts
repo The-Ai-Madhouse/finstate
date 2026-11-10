@@ -17,12 +17,16 @@ export interface SettleItem {
   matchId?: string;
   /** Saldoen fra før perioden, samlet i én linje (kan parres med periodens bevægelser). */
   primo?: boolean;
+  /** Tages med til næste periode (accepteret, at den ikke er afklaret endnu). */
+  carried?: boolean;
 }
 
 export interface SettleGroup {
   match: Match;
   items: SettleItem[];
   sum: number;
+  /** Differencen tages med til næste periode. */
+  carried?: boolean;
 }
 
 /** Nøglen for "saldo primo" i en periode. */
@@ -81,7 +85,7 @@ export function withSettle(d: AppData, periodId: string, accountId: string, on: 
   };
 }
 
-export function settleState(data: AppData, ledger: Ledger, accountId: string, period?: Pick<Period, 'start' | 'end'>) {
+export function settleState(data: AppData, ledger: Ledger, accountId: string, period?: Pick<Period, 'start' | 'end'> & { settleCarry?: string[] }) {
   const items = settleItems(data, ledger, accountId, period);
   // En gruppe hører kun til perioden, hvis ALLE dens bevægelser ligger i perioden (eller er periodens saldo primo).
   // Grupper på tværs af perioder vises ikke – deres bevægelser står som uparrede her.
@@ -97,8 +101,47 @@ export function settleState(data: AppData, ledger: Ledger, accountId: string, pe
     // En parring kræver mindst to (fx hvis den anden er slettet, står den tilbageværende som uparret).
     .filter((g) => g.items.length > 1)
     .sort((a, b) => (a.items[0].date < b.items[0].date ? -1 : 1));
+  const carry = new Set(period?.settleCarry ?? []);
+  for (const g of groups) if (g.sum !== 0 && carry.has(`match:${g.match.id}`)) g.carried = true;
   const open = items.filter((i) => !i.matchId || !groups.some((g) => g.match.id === i.matchId));
-  return { items, groups, open, openSum: open.reduce((s, i) => s + i.amount, 0), suggestions: suggestPairs(open) };
+  for (const i of open) if (carry.has(i.key)) i.carried = true;
+  // Uafklaret: uparrede bevægelser og grupper, der ikke går op – medmindre de tages med til næste periode.
+  const pending = open.filter((i) => !i.carried);
+  const bad = groups.filter((g) => g.sum !== 0 && !g.carried);
+  const carriedSum = open.filter((i) => i.carried).reduce((s, i) => s + i.amount, 0) + groups.filter((g) => g.carried).reduce((s, g) => s + g.sum, 0);
+  return {
+    items, groups, open, pending, bad, carriedSum,
+    openSum: open.reduce((s, i) => s + i.amount, 0),
+    suggestions: suggestPairs(pending),
+    /** Alt er afklaret: parret og gået op, afskrevet – eller taget med til næste periode. */
+    done: items.length > 0 && !pending.length && !bad.length,
+  };
+}
+
+/** Tag en bevægelse eller en gruppes difference med til næste periode (eller fortryd). Gælder kun denne periode. */
+export function withCarry(d: AppData, periodId: string, key: string, on: boolean): AppData {
+  return {
+    ...d,
+    periods: d.periods.map((p) => {
+      if (p.id !== periodId) return p;
+      const rest = (p.settleCarry ?? []).filter((k) => k !== key);
+      return { ...p, settleCarry: on ? [...rest, key] : rest };
+    }),
+  };
+}
+
+/**
+ * Afskriv en enkelt uparret bevægelse (fx et udlæg, der aldrig bliver betalt tilbage): en åben post med kategori,
+ * der bringer bevægelsen i 0 på posten, parret med den. Dateres i perioden.
+ */
+export function writeOffItem(d: AppData, ledger: Ledger, accountId: string, key: string, categoryId: string, period: Pick<Period, 'start' | 'end'>): AppData {
+  const item = settleItems(d, ledger, accountId, period).find((i) => i.key === key);
+  const acc = d.accounts.find((a) => a.id === accountId);
+  if (!item || !item.amount || !acc) return d;
+  const id = uid('oi');
+  const date = item.date < period.start ? period.start : item.date;
+  const n: AppData = { ...d, openItems: [...d.openItems, { id, date, counterparty: acc.name, accountId, amount: -item.amount, categoryId, note: 'Afskrevet' }] };
+  return pairItems(n, accountId, [key, `oi:${id}`]);
 }
 
 /** Forslag: to åbne bevægelser med præcis modsat beløb – tætteste dato først, hver bruges højst én gang. */
@@ -119,6 +162,12 @@ export function suggestPairs(open: SettleItem[]): [SettleItem, SettleItem][] {
 /** En afskrevet difference: en åben post med kategori, som hører til en gruppe. */
 const isWriteOff = (d: Pick<AppData, 'openItems'>, k: string) => k.startsWith('oi:') && !!d.openItems.find((o) => o.id === k.slice(3))?.categoryId;
 
+/** En gruppe skal have mindst to rigtige bevægelser – eller én bevægelse, der er afskrevet. */
+const validGroup = (d: Pick<AppData, 'openItems'>, keys: string[]) => {
+  const real = keys.filter((k) => !isWriteOff(d, k)).length;
+  return real >= 2 || (real === 1 && keys.length > 1);
+};
+
 /**
  * Ryd op efter en ændring: grupper med færre end to rigtige bevægelser opløses (en afskrivning tæller ikke),
  * og afskrivninger, der ikke længere hører til en gruppe, slettes – så de ikke bliver stående som et beløb.
@@ -126,8 +175,7 @@ const isWriteOff = (d: Pick<AppData, 'openItems'>, k: string) => k.startsWith('o
 function tidy(d: AppData, matches: Match[], dropOi: Set<string>): AppData {
   const keep: Match[] = [];
   for (const m of matches) {
-    const real = m.keys.filter((k) => !isWriteOff(d, k));
-    if (real.length < 2) { for (const k of m.keys) if (isWriteOff(d, k)) dropOi.add(k.slice(3)); continue; }
+    if (!validGroup(d, m.keys)) { for (const k of m.keys) if (isWriteOff(d, k)) dropOi.add(k.slice(3)); continue; }
     keep.push(m);
   }
   const referenced = new Set(keep.flatMap((m) => m.keys));
@@ -185,8 +233,8 @@ export function unpair(d: AppData, matchId: string, key?: string): AppData {
 /** Ved indlæsning: afskrivninger, som ikke længere hører til en gruppe (fx efter en ophævet parring), og grupper med kun én bevægelse. */
 export function tidySettle(d: AppData): AppData {
   const referenced = new Set((d.matches ?? []).flatMap((m) => m.keys));
-  const stray = d.openItems.filter((o) => o.categoryId && o.note === 'Afskrevet difference' && !referenced.has(`oi:${o.id}`)).map((o) => o.id);
-  const lonely = (d.matches ?? []).some((m) => m.keys.filter((k) => !isWriteOff(d, k)).length < 2);
+  const stray = d.openItems.filter((o) => o.categoryId && (o.note === 'Afskrevet difference' || o.note === 'Afskrevet') && !referenced.has(`oi:${o.id}`)).map((o) => o.id);
+  const lonely = (d.matches ?? []).some((m) => !validGroup(d, m.keys));
   if (!stray.length && !lonely) return d;
   return tidy(d, d.matches ?? [], new Set(stray));
 }

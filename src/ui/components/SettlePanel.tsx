@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
-import { isSettled, pairItems, settleState, unpair, withSettle, writeOffDifference, type SettleItem } from '../../domain/settle';
+import { isSettled, pairItems, settleState, unpair, withCarry, withSettle, writeOffDifference, writeOffItem, type SettleItem } from '../../domain/settle';
 import { linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
@@ -27,16 +27,20 @@ export function SettlePanel({ acc }: { acc: Account }) {
   const done = st.groups.filter((g) => g.sum === 0);
   const notDone = st.groups.filter((g) => g.sum !== 0);
   const shownGroups = showDone ? st.groups : notDone;
+  const carry = (key: string, on: boolean) => period && update((d) => withCarry(d, period.id, key, on));
+  const writeOffOne = (key: string, categoryId: string) => period && update((d) => writeOffItem(d, e.ledger, acc.id, key, categoryId, period));
+  const next = period ? nextYearName(period.name) : 'næste periode';
 
   if (!st.items.length) return <div className="small muted">Ingen bevægelser på posten{period ? ` i ${period.name}` : ''}. Vælg "Intern" og posten, når du kategoriserer et udlæg eller en tilbagebetaling.</div>;
 
-  const itemRow = (i: SettleItem, extra?: React.ReactNode) => (
-    <tr key={i.key} className={i.primo ? 'settle-primo' : undefined}>
+  const itemRow = (i: SettleItem, extra?: React.ReactNode, actions?: React.ReactNode) => (
+    <tr key={i.key} className={`${i.primo ? 'settle-primo' : ''} ${i.carried ? 'settle-carried' : ''}`.trim() || undefined}>
       <td style={{ width: 28 }}>{extra}</td>
       <td className="small" style={{ whiteSpace: 'nowrap' }}>{i.primo ? 'primo' : dateShort(i.date)}</td>
       <td className="ellipsis" style={{ maxWidth: 360 }} title={i.primo ? `Saldoen pr. ${dateShort(i.date)} – alt fra før perioden samlet` : i.text}>{i.text}</td>
       <td className="num"><Money v={i.amount} decimals signed colored /></td>
-      <td className="num">{i.txId && <button className="btn sm ghost" title="Vis transaktionen i Kategorisér" onClick={() => showTx(i.txId!)}>Vis →</button>}</td>
+      <td className="num" style={{ whiteSpace: 'nowrap' }}>{i.txId && <button className="btn sm ghost" title="Vis transaktionen i Kategorisér" onClick={() => showTx(i.txId!)}>Vis →</button>}</td>
+      {actions !== undefined && <td className="num" style={{ whiteSpace: 'nowrap' }}>{actions}</td>}
     </tr>
   );
 
@@ -47,9 +51,17 @@ export function SettlePanel({ acc }: { acc: Account }) {
         <InfoBox label="Fortegn og periode">+ øger saldoen (fx et udlæg), − mindsker den (fx en tilbagebetaling). En gruppe går op, når summen er 0.
           Kun {period ? period.name : 'periodens'} bevægelser vises; alt fra før perioden står samlet som "Saldo primo" og kan parres med periodens bevægelser.</InfoBox>
         <span className="spacer" />
-        <span className={`chip ${st.open.length ? 'review' : 'user'}`}>{st.open.length} uparrede</span>
+        {st.done
+          ? <span className="chip user" title="Alt er parret og går op, afskrevet – eller taget med til næste periode">✓ Afstemt</span>
+          : <span className="chip review">{st.pending.length + st.bad.length} uafklarede</span>}
         <span className="chip">{done.length} udlignet</span>
+        {st.carriedSum !== 0 && <span className="chip" title={`Bliver stående på posten og indgår i saldo primo i ${next}`}>→ {next}: <Money v={st.carriedSum} decimals signed /></span>}
       </div>
+      {!st.done && (
+        <p className="small ink2" style={{ margin: '0 0 6px' }}>
+          Par det, der hører sammen. Det, der er tilbage, kan du <b>afskrive</b> (som udgift/indtægt nu) eller <b>tage med til {next}</b> – så bliver beløbet stående på posten og kan parres dér.
+        </p>
+      )}
 
       {st.suggestions.length > 0 && (
         <div className="settle-suggest">
@@ -73,7 +85,13 @@ export function SettlePanel({ acc }: { acc: Account }) {
         <>
           <div className="section-label">Uparrede bevægelser</div>
           <table className="small">
-            <tbody>{st.open.map((i) => itemRow(i, <input type="checkbox" checked={sel.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Vælg ${i.text}`} />))}</tbody>
+            <tbody>{st.open.map((i) => itemRow(i, <input type="checkbox" checked={sel.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Vælg ${i.text}`} />,
+              i.carried
+                ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}><span className="chip" title={`Bliver stående på posten og indgår i saldo primo i ${next}`}>→ {next}</span><button className="btn sm ghost" onClick={() => carry(i.key, false)}>Fortryd</button></span>
+                : <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+                    <WriteOff label="Afskriv…" sum={-i.amount} onPick={(c) => writeOffOne(i.key, c)} />
+                    <button className="btn sm ghost" title={`Acceptér, at den ikke er afklaret endnu – beløbet bliver stående på posten og tages med til ${next}`} onClick={() => carry(i.key, true)}>Tag med til {next}</button>
+                  </span>))}</tbody>
           </table>
           <div className="row small" style={{ marginTop: 4 }}>
             {selItems.length > 0 ? (
@@ -100,10 +118,16 @@ export function SettlePanel({ acc }: { acc: Account }) {
             <tbody>{g.items.map((i) => itemRow(i, <button className="btn sm ghost" title="Tag ud af gruppen" aria-label="Tag ud af gruppen" onClick={() => update((d) => unpair(d, g.match.id, i.key))}>✕</button>))}</tbody>
           </table>
           <div className="row small" style={{ marginTop: 4 }}>
-            {g.sum === 0 ? <span className="chip user">✓ Udlignet</span> : (
+            {g.sum === 0 ? <span className="chip user">✓ Udlignet</span> : g.carried ? (
+              <>
+                <span className="chip" title={`Resten bliver stående på posten og indgår i saldo primo i ${next}`}>{g.sum > 0 ? `Mangler ${kr(g.sum)}` : `${kr(-g.sum)} for meget`} → {next}</span>
+                <button className="btn sm ghost" onClick={() => carry(`match:${g.match.id}`, false)}>Fortryd</button>
+              </>
+            ) : (
               <>
                 <span className="chip review">{g.sum > 0 ? `Mangler ${kr(g.sum)}` : `${kr(-g.sum)} for meget`}</span>
                 <WriteOff onPick={(categoryId) => update((d) => writeOffDifference(d, e.ledger, g.match.id, categoryId, period))} sum={g.sum} />
+                <button className="btn sm ghost" title={`Acceptér, at det ikke går op endnu – resten bliver stående på posten og tages med til ${next}`} onClick={() => carry(`match:${g.match.id}`, true)}>Tag med til {next}</button>
               </>
             )}
             <span className="spacer" />
@@ -117,9 +141,9 @@ export function SettlePanel({ acc }: { acc: Account }) {
 }
 
 /** Afskriv en difference som udgift/indtægt (fx "lad de 50 kr gå"). */
-function WriteOff({ onPick, sum }: { onPick: (categoryId: string) => void; sum: number }) {
+function WriteOff({ onPick, sum, label = 'Afskriv differencen…' }: { onPick: (categoryId: string) => void; sum: number; label?: string }) {
   const [open, setOpen] = useState(false);
-  if (!open) return <button className="btn sm ghost" title="Bogfør differencen som en udgift eller indtægt, så gruppen går op" onClick={() => setOpen(true)}>Afskriv differencen…</button>;
+  if (!open) return <button className="btn sm ghost" title="Bogfør beløbet som en udgift eller indtægt nu, så det er afklaret" onClick={() => setOpen(true)}>{label}</button>;
   return (
     <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
       <span className="ink2">som</span>
@@ -181,18 +205,17 @@ export function SettleOverview() {
         <div className="small muted">Ingen poster valgt i {period?.name ?? 'perioden'}. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig" – valget gælder kun dette financial statement.</div>
       ) : (
         <table>
-          <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Uparrede</th><th>Går ikke op</th><th /></tr></thead>
+          <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Status</th><th className="num">Til næste periode</th><th /></tr></thead>
           <tbody>
             {posts.map((a) => {
               const st = settleState(e.data, e.ledger, a.id, period);
-              const bad = st.groups.filter((g) => g.sum !== 0).length;
               const bal = st.items.reduce((s, i) => s + i.amount, 0);
               return [
                 <tr key={a.id} className={`click ${openId === a.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpenId(openId === a.id ? undefined : a.id); }}>
                   <td><span className={`caret ${openId === a.id ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
                   <td className="num"><Money v={bal} decimals /></td>
-                  <td>{st.open.length ? <span className="chip review">{st.open.length}</span> : <span className="chip user">0</span>}</td>
-                  <td>{bad ? <span className="chip review">{bad}</span> : <span className="muted small">–</span>}</td>
+                  <td>{st.done ? <span className="chip user">✓ Afstemt</span> : <span className="chip review">{st.pending.length + st.bad.length} uafklarede</span>}</td>
+                  <td className="num">{st.carriedSum ? <Money v={st.carriedSum} decimals signed /> : <span className="muted small">–</span>}</td>
                   <td className="num" style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn sm ghost" onClick={() => setOpenId(openId === a.id ? undefined : a.id)}>{openId === a.id ? 'Luk' : 'Afstem'}</button>
                     <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id)}>Post →</button>
@@ -271,3 +294,6 @@ export function SettleToggle({ acc }: { acc: Account }) {
     </div>
   );
 }
+
+/** "2025" → "2026"; ellers "næste periode". */
+export const nextYearName = (name: string) => (/^\d{4}$/.test(name.trim()) ? String(Number(name.trim()) + 1) : 'næste periode');

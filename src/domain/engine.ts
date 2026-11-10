@@ -1,4 +1,5 @@
 import { coveredRange } from './imports';
+import { isSettled, settleState } from './settle';
 import { compareFor, elapsedEnd, inProgress, yearPeriod } from './periods';
 import { migrateModel, migrateOutlays } from './migrate';
 import { NEEDS_REVIEW, resolveAll, type Resolved } from './classify';
@@ -121,6 +122,14 @@ export function periodChecks(e: Engine, p: Period): Check[] {
     const recv = open.filter((r) => r.close > 0).reduce((s, r) => s + r.close, 0);
     const owe = -open.filter((r) => r.close < 0).reduce((s, r) => s + r.close, 0);
     out.push({ id: 'cp', level: 'info', title: `${open.length} personer med åbne udlæg`, detail: `Tilgodehavende ${kr(recv)} · gæld ${kr(owe)}. Tjek at de er reelle – ellers er det en udgift/indtægt.`, view: 'transfers' });
+  }
+
+  // 4b. Afstemning: de poster, du afstemmer i perioden, skal være afklaret (parret, afskrevet – eller taget med til næste periode)
+  for (const a of data.accounts.filter((x) => isSettled(p, x))) {
+    const ss = settleState(data, ledger, a.id, p);
+    const n = ss.pending.length + ss.bad.length;
+    if (n) out.push({ id: `settle-${a.id}`, level: 'warn', title: `${a.name}: ${n} uafklarede i afstemningen`, detail: 'Par det, der hører sammen – og afskriv resten eller tag det med til næste periode.', view: 'transfers' });
+    else if (ss.items.length) out.push({ id: `settle-${a.id}`, level: 'ok', title: `${a.name}: afstemt${ss.carriedSum ? ` – ${kr(Math.abs(ss.carriedSum))} tages med til næste periode` : ''}` });
   }
 
   // 5. Værdier

@@ -705,3 +705,4 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .pair-choice p { margin: 0; }
 .pair-choice label.row { gap: 8px; cursor: pointer; }
 .pair-choice .combo { max-width: 360px; }
+tr.settle-carried td { color: var(--ink-2); }

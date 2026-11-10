@@ -954,3 +954,41 @@ describe('afskrevet difference følger gruppen', () => {
     expect(tidySettle(cleaned)).toBe(cleaned);
   });
 });
+
+describe('afklar resten: afskriv eller tag med til næste periode', () => {
+  it('writes off a single movement, or carries it forward so it shows up in the next year primo', async () => {
+    const { settleState, withSettle, withCarry, writeOffItem, unpair } = await import('./settle');
+    const { periodChecks } = await import('./engine');
+    const d0 = demoData();
+    const buy = d0.txs.find((t) => t.text.includes('Restaurant Havnehuset') && t.date === '2025-10-14')!;
+    let d = { ...d0, txs: d0.txs.map((t) => (t.id === buy.id ? { ...t, manual: { type: 'internal' as const, targetAccountId: 'acc-jonas' } } : t)) };
+    d = withSettle(d, 'p-2025', 'acc-jonas', true);
+    const y25 = () => d.periods[0];
+    let st = settleState(d, buildEngine(d).ledger, 'acc-jonas', y25());
+    // primo 200 ↔ 20.08 −200 er uparrede, og restaurantudlægget 1.200
+    expect(st.done).toBe(false);
+    expect(periodChecks(buildEngine(d), y25()).find((c) => c.id === 'settle-acc-jonas')?.level).toBe('warn');
+    // Tag udlægget med til 2026
+    d = withCarry(d, 'p-2025', `tx:${buy.id}`, true);
+    st = settleState(d, buildEngine(d).ledger, 'acc-jonas', y25());
+    expect(st.carriedSum).toBe(120000);
+    expect(st.pending.map((i) => i.key)).not.toContain(`tx:${buy.id}`);
+    // Saldo primo 2026 indeholder det videreførte beløb
+    const st26 = settleState(d, buildEngine(d).ledger, 'acc-jonas', d.periods[1]);
+    expect(st26.items.find((i) => i.primo)?.amount).toBe(120000);
+    // Afskriv i stedet: posten går i 0 for udlægget, og en afskrivning, der fjernes, tager gruppen med sig
+    d = withCarry(d, 'p-2025', `tx:${buy.id}`, false);
+    d = writeOffItem(d, buildEngine(d).ledger, 'acc-jonas', `tx:${buy.id}`, 'ex-gaver-givet', y25());
+    st = settleState(d, buildEngine(d).ledger, 'acc-jonas', y25());
+    const g = st.groups.find((x) => x.items.some((i) => i.key === `tx:${buy.id}`))!;
+    expect(g.sum).toBe(0);
+    const undone = unpair(d, g.match.id);
+    expect(undone.openItems.some((o) => o.note === 'Afskrevet')).toBe(false);
+    // Par primo med tilbagebetalingen → alt afklaret
+    const keys = st.pending.map((i) => i.key);
+    const { pairItems } = await import('./settle');
+    d = pairItems(d, 'acc-jonas', keys);
+    expect(settleState(d, buildEngine(d).ledger, 'acc-jonas', y25()).done).toBe(true);
+    expect(periodChecks(buildEngine(d), y25()).find((c) => c.id === 'settle-acc-jonas')?.level).toBe('ok');
+  });
+});

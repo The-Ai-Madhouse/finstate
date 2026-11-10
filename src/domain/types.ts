@@ -188,6 +188,11 @@ export interface Period {
   show?: 'year' | 'h1' | 'h2';
   /** Poster, der afstemmes i netop denne periode (fx "Jonas skylder mig") – vælges pr. periode. */
   settle?: string[];
+  /**
+   * Afstemning: det, du har accepteret ikke går op endnu og tager med til næste periode
+   * (bevægelser "tx:…"/"primo:…" eller grupper "match:…"). Beløbet bliver stående på posten og indgår i næste periodes saldo primo.
+   */
+  settleCarry?: string[];
 }
 
 /** Brugerens egne posttyper (fx "Opsparing", "Lån"). "Ingen type" er altid en mulighed. */
