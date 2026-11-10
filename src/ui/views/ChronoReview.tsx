@@ -50,6 +50,14 @@ function focusNextPending(fromId: string) {
   }, 60);
 }
 
+/** Stil markøren i rækkens kategorisøgning (efter React har opdateret – også hvis rækken er monteret på ny). */
+export function focusTxField(txId: string, attr = 'data-txrow') {
+  setTimeout(() => {
+    const row = document.querySelector<HTMLElement>(`[${attr}="${CSS.escape(txId)}"]`);
+    row?.querySelector<HTMLElement>('.combo-input, input[aria-label="Person"]')?.focus();
+  }, 60);
+}
+
 /**
  * Kronologisk gennemgang (ældste først) med brugerens kommentar fremme.
  * En afgørelse kan gemmes som regel, så senere ens poster klares automatisk –
@@ -273,7 +281,7 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
       </div>
       <div className="num"><Money v={tx.amount} decimals colored /></div>
       {open && isSplit && !replaceSplit ? (
-        <SplitBreakdown r={r} total={tx.amount} source={isPending ? r.source : undefined} onEdit={() => setShowSplit(true)} onReplace={() => setReplaceSplit(true)} />
+        <SplitBreakdown r={r} total={tx.amount} source={isPending ? r.source : undefined} onEdit={() => setShowSplit(true)} onReplace={() => { setReplaceSplit(true); focusTxField(tx.id); }} />
       ) : isSplit && !open ? (
         <SplitBreakdown r={r} total={tx.amount} source={r.source} />
       ) : open ? (
@@ -301,10 +309,10 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
           </>
         ) : (
           <>
-            {r.source === 'manual' && <button className="btn sm ghost" title="Fjern dit valg (brug regel/forslag)" onClick={() => setManual([tx.id], undefined)}>↺</button>}
+            {r.source === 'manual' && <button className="btn sm ghost" title="Fjern dit valg (brug regel/forslag)" onClick={() => { setManual([tx.id], undefined); focusTxField(tx.id); }}>↺</button>}
             {similar.length > 0 && <button className="btn sm ghost" title="Samme tekst – i perioden (+ andre perioder)" onClick={() => setShowSimilar(true)}>{similarLabel}</button>}
             {isSplit && <button className="btn sm ghost" onClick={() => setShowSplit(true)}>Ret opdeling</button>}
-            <button className="btn sm ghost" onClick={() => setEditing(true)}>Ret</button>
+            <button className="btn sm ghost" onClick={() => { setEditing(true); focusTxField(tx.id); }}>Ret</button>
           </>
         )}
       </div>

@@ -7,7 +7,7 @@ import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
 import { useStore, type LedgerFilter } from '../../store/store';
 import { activeFilterCount, filterTxs } from '../../domain/txfilter';
-import { ChronoReview } from './ChronoReview';
+import { ChronoReview, focusTxField } from './ChronoReview';
 import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
@@ -295,7 +295,7 @@ function TxTable({ txs }: { txs: Tx[] }) {
             {txs.slice(0, limit).flatMap((t) => {
               const r = e.resolved.get(t.id)!;
               const rows = [
-                <tr key={t.id} tabIndex={0} onKeyDown={(ev) => onKey(ev, t, r)}>
+                <tr key={t.id} data-ledgerrow={t.id} tabIndex={0} onKeyDown={(ev) => onKey(ev, t, r)}>
                   <td className="small">{dateShort(t.date)}</td>
                   <td className="small muted">{accName(t.accountId)}</td>
                   <td style={{ maxWidth: 320 }}>
@@ -319,9 +319,9 @@ function TxTable({ txs }: { txs: Tx[] }) {
                     {e.data.settings.rulesEnabled === true && (r.source === 'manual' || NEEDS_REVIEW.has(r.source)) && (
                       <button className="btn sm ghost" title="Gem som regel for denne tekst" onClick={() => saveRule(t, clsOf(r), [t.id])}>Regel</button>
                     )}
-                    {r.source === 'manual' && <button className="btn sm ghost" title="Fjern dit valg (brug regel/forslag)" onClick={() => setManual([t.id], undefined)}>↺</button>}
+                    {r.source === 'manual' && <button className="btn sm ghost" title="Fjern dit valg (brug regel/forslag)" onClick={() => { setManual([t.id], undefined); focusTxField(t.id, 'data-ledgerrow'); }}>↺</button>}
                     <button className="btn sm ghost" onClick={() => setSplitTx(t.id)}>{r.lines.length > 1 ? 'Ret opdeling' : 'Opdel'}</button>
-                    {r.lines.length > 1 && <button className="btn sm ghost" title="Erstat opdelingen med én kategori" onClick={() => setManual([t.id], clsOf(r))}>Én kategori</button>}
+                    {r.lines.length > 1 && <button className="btn sm ghost" title="Erstat opdelingen med én kategori" onClick={() => { setManual([t.id], clsOf(r)); focusTxField(t.id, 'data-ledgerrow'); }}>Én kategori</button>}
                   </td>
                 </tr>,
               ];
