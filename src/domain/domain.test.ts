@@ -799,3 +799,25 @@ describe('indbetaling fra penge undervejs', () => {
     expect(transferInfo(d, e.resolved, e.txById, inn, d.periods[0])).toMatchObject({ kind: 'direct', transitRef: 'transit' });
   });
 });
+
+describe('penge undervejs fra forrige periode', () => {
+  it('shows what landed automatically, what you chose, and what is still missing', async () => {
+    const { carriedTransit, transitCandidates } = await import('./transfers');
+    const d0 = demoData();
+    const e0 = buildEngine(d0);
+    // 2026: nytårsoverførslen (6.000 til Fælles opsparing) landede 02.01 – automatisk.
+    const [c26] = carriedTransit(d0, e0.ledger, e0.resolved, d0.periods[1]);
+    expect([c26.ref, c26.primo, c26.remaining, c26.landed.length, c26.landed[0].chosen]).toEqual(['transit:acc-ops', 600000, 0, 1, false]);
+    // 2025: 3.800 kr undervejs ved bogføringsstart (ukendt modtager) – mangler, indtil du vælger indbetalingen.
+    const d = { ...d0, settings: { ...d0.settings, openingTransit: 380000 } };
+    const e = buildEngine(d);
+    const [c] = carriedTransit(d, e.ledger, e.resolved, d.periods[0]);
+    expect([c.ref, c.remaining, c.landed]).toEqual(['transit', 380000, []]);
+    const cand = transitCandidates(d, e.resolved, d.periods[0], c);
+    expect(cand[0].amount).toBe(380000); // samme beløb først
+    const d2 = { ...d, txs: d.txs.map((t) => (t.id === cand[0].id ? { ...t, manual: { type: 'internal' as const, transitRef: 'transit' } } : t)) };
+    const e2 = buildEngine(d2);
+    const [c2] = carriedTransit(d2, e2.ledger, e2.resolved, d2.periods[0]);
+    expect([c2.remaining, c2.landed.map((x) => [x.tx.id, x.chosen])]).toEqual([0, [[cand[0].id, true]]]);
+  });
+});

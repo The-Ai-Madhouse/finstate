@@ -6,8 +6,8 @@ import { dateShort, kr } from '../../domain/format';
 import type { Account, Classification, Period, Tx } from '../../domain/types';
 import { textMatches } from '../../domain/txfilter';
 import { transitName } from '../../domain/ledger';
-import { transferInfo } from '../../domain/transfers';
-import { dayDiff } from '../../domain/util';
+import { carriedTransit, transferInfo, transitCandidates, type CarriedTransit } from '../../domain/transfers';
+import { addDays, dayDiff } from '../../domain/util';
 import { pairTxs, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { AccountSelect, ClassEditor, Empty, InfoBox, Money, SearchCombo, isComplete } from '../components/common';
@@ -46,6 +46,7 @@ function Internal() {
   const internal = data.txs.filter((t) => inPeriod(t, period) && t.date > data.settings.bookStart && isInternal(t));
   const st = e.statement(period);
   const transitRows = st.rows.filter((r) => r.kind === 'transit' && r.close !== 0);
+  const carried = carriedTransit(data, e.ledger, e.resolved, period);
 
   // Byg listen: ét element pr. par (uanset hvilken side der ligger i perioden), ellers pr. transaktion.
   const items: Item[] = [];
@@ -125,6 +126,7 @@ function Internal() {
           {folded && <span className="small muted">{count.paired} parret · {count.direct} direkte{count.transit ? ` · ${count.transit} undervejs` : ''}{count.missing ? '' : ' · alle har en modpost'}</span>}
         </button>
         {folded && count.missing > 0 && <span className="chip review">{count.missing} mangler modpost</span>}
+        {folded && carried.some((c) => c.remaining) && <span className="chip review">Penge undervejs fra forrige periode mangler at lande</span>}
         {transitRows.map((r) => (
           <span key={r.ref} className="chip" title={`Penge undervejs ved periodens slutning (primo ${kr(r.open)})`}>{r.label}: {kr(r.close)}</span>
         ))}
@@ -143,6 +145,7 @@ function Internal() {
           <dd>Modposten ligger i en anden periode (fx sendt 31.12, landet 2.1). I denne periode står beløbet som <b>penge undervejs</b> til den konto, hvor pengene lander.</dd>
         </dl>
       </InfoBox>
+      {carried.length > 0 && <CarriedSection carried={carried} period={period} />}
       <div className="row xfer-filters">
         <div className="seg" role="radiogroup" aria-label="Status">
           {SEG.map((x) => <button key={x.id} role="radio" aria-checked={status === x.id} title={x.tip} className={status === x.id ? 'on plain' : ''} onClick={() => setStatus(x.id)}>{x.label}</button>)}
@@ -248,6 +251,67 @@ function TxEdit({ t }: { t: Tx }) {
         <button className="btn sm primary" disabled={!isComplete(cls)} onClick={() => setManual([t.id], cls)}>Gem</button>
         <button className="btn sm ghost" title="Åbn i Kategorisér" onClick={() => useStore.getState().showTx(t.id)}>Vis →</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Penge, der var undervejs ved periodens start (fx sendt før nytår): hvilke transaktioner i perioden har hentet dem,
+ * og hvad mangler. Vælg selv den indbetaling, beløbet landede som – fx hvis den ikke er parret automatisk.
+ */
+function CarriedSection({ carried, period }: { carried: CarriedTransit[]; period: Period }) {
+  const e = useEngine();
+  const { data } = e;
+  const acc = (id: string) => data.accounts.find((a) => a.id === id)?.name ?? '';
+  const primoDate = dateShort(addDays(period.start, -1));
+  return (
+    <div className="carried">
+      <div className="section-label">Penge undervejs fra forrige periode</div>
+      {carried.map((c) => {
+        const incoming = c.primo > 0;
+        const cands = transitCandidates(data, e.resolved, period, c);
+        const exact = cands.filter((t) => t.amount === c.remaining).slice(0, 2);
+        return (
+          <div key={c.ref} className={`xfer-item ${c.remaining ? 'missing' : ''}`}>
+            <div className="row" style={{ gap: 8 }}>
+              <b>{transitName(data, c.ref)}</b>
+              <span className="small muted">{kr(Math.abs(c.primo))} pr. {primoDate}</span>
+              <span className="spacer" />
+              {c.remaining
+                ? <span className="chip review">{kr(Math.abs(c.remaining))} mangler at {incoming ? 'lande' : 'blive sendt'}</span>
+                : <span className="chip user">✓ {incoming ? 'Landet' : 'Sendt'}</span>}
+            </div>
+            {c.landed.map((x) => (
+              <div key={x.tx.id} className="row small carried-line">
+                <span className="muted">{dateShort(x.tx.date)}</span>
+                <b>{acc(x.tx.accountId)}</b>
+                <span className="ellipsis ink2" style={{ maxWidth: 360 }} title={x.tx.text}>{x.tx.text}</span>
+                <Money v={x.tx.amount} decimals colored />
+                <span className="spacer" />
+                {x.chosen
+                  ? <><span className="chip">Valgt af dig</span><button className="btn sm ghost" title="Det var ikke den – fjern valget" onClick={() => setManual([x.tx.id], undefined)}>Fortryd</button></>
+                  : <span className="small muted" title="Overførslen er sendt til denne konto i forrige periode">automatisk</span>}
+                <button className="btn sm ghost" title="Åbn i Kategorisér" onClick={() => useStore.getState().showTx(x.tx.id)}>Vis →</button>
+              </div>
+            ))}
+            {c.remaining !== 0 && (
+              <div className="xfer-pick row small">
+                {exact.map((t) => (
+                  <span key={t.id} className="row" style={{ gap: 6 }}>
+                    <span className="ink2">Forslag: {acc(t.accountId)} {dateShort(t.date)} "{t.text}" {kr(Math.abs(t.amount))}</span>
+                    <button className="btn sm primary" onClick={() => setManual([t.id], { type: 'internal', transitRef: c.ref })}>Det er den</button>
+                  </span>
+                ))}
+                <SearchCombo className="sm" value={undefined} placeholder={`${exact.length ? 'Eller find' : 'Find'} ${incoming ? 'indbetalingen' : 'udbetalingen'}…`} searchPlaceholder="Søg dato, konto, tekst eller beløb…"
+                  ariaLabel="Find transaktionen for penge undervejs" emptyText="Ingen transaktion matcher"
+                  options={cands.slice(0, 300).map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${acc(t.accountId)} · ${t.text} · ${kr(Math.abs(t.amount))}`, hint: t.amount !== c.remaining ? '(andet beløb)' : undefined }))}
+                  onChange={(id) => id && setManual([id], { type: 'internal', transitRef: c.ref })} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="section-label" style={{ marginTop: 14 }}>Periodens interne overførsler</div>
     </div>
   );
 }
