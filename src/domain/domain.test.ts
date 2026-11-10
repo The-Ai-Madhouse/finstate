@@ -1015,3 +1015,20 @@ describe('tag stilling til en post: afskriv eller lad stå', () => {
     expect(buildEngine(d).statement(d.periods[0]).rows.find((r) => r.ref === 'acc:acc-jonas')?.close ?? 0).toBe(0);
   });
 });
+
+describe('indsigter måned for måned', () => {
+  it('splits the period into months that add up to the statement', async () => {
+    const { monthlyRows, topExpenseCategories, monthsOf } = await import('./monthly');
+    const d = demoData();
+    const e = buildEngine(d);
+    const y25 = d.periods[0];
+    const rows = monthlyRows(d.categories, e.ledger, y25, '2026-11-10');
+    expect(rows).toHaveLength(12);
+    const s = e.statement(y25);
+    expect(rows.reduce((a, r) => a + r.income, 0)).toBe(s.incomeTotal);
+    expect(rows.reduce((a, r) => a + r.expense, 0)).toBe(s.expenseTotal);
+    expect(rows[11].equity).toBe(s.equityClose);
+    expect(topExpenseCategories(rows)[0]).toBe('ex-bolig');
+    expect(monthsOf({ start: '2026-01-01', end: '2026-12-31' }, '2026-03-15')).toEqual(['2026-01', '2026-02', '2026-03']);
+  });
+});

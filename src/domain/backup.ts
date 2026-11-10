@@ -8,15 +8,17 @@ export interface BackupFile {
   kind: 'full' | 'rules';
   version: 1;
   exportedAt: string;
+  /** Hvilken app-version der lavede filen, fx "v0.1.0 · build 41 · 98f2986". */
+  appVersion?: string;
   data: Partial<AppData>;
 }
 
-export function makeBackup(data: AppData, kind: 'full' | 'rules'): BackupFile {
+export function makeBackup(data: AppData, kind: 'full' | 'rules', appVersion?: string): BackupFile {
   const payload: Partial<AppData> =
     kind === 'full'
       ? data
       : { categories: data.categories, rules: data.rules, bankMap: data.bankMap, accounts: data.accounts, importProfiles: data.importProfiles };
-  return { app: APP_ID, kind, version: 1, exportedAt: new Date().toISOString(), data: payload };
+  return { app: APP_ID, kind, version: 1, exportedAt: new Date().toISOString(), appVersion, data: payload };
 }
 
 export function parseBackup(text: string): BackupFile {

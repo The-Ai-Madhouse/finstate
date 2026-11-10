@@ -4,6 +4,7 @@ import { inPeriod } from '../domain/engine';
 import { useEngine, usePeriod } from '../store/actions';
 import { useStore, type View } from '../store/store';
 import { exportBackup } from './backup';
+import { VERSION_DETAILS, VERSION_LABEL } from '../version';
 import { ViewHelp, nextStepOf, useGuide } from './components/Guide';
 import { BalanceView } from './views/BalanceView';
 import { ImportView } from './views/ImportView';
@@ -73,7 +74,10 @@ export function App() {
         <div className="nav-tools">
           <NavItem id="settings" label="Indstillinger" icon={<span className="step">⚙</span>} />
         </div>
-        <div className="nav-foot">Data forlader aldrig din computer. Gemmes i denne browser – tag backup.</div>
+        <div className="nav-foot">
+          Data forlader aldrig din computer. Gemmes i denne browser – tag backup.
+          <div className="nav-version" title={VERSION_DETAILS}>{VERSION_LABEL}</div>
+        </div>
       </nav>
       <div className="main">
         <TopBar />

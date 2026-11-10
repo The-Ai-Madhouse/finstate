@@ -16,6 +16,7 @@ import { download, useEngine, usePeriod } from '../../store/actions';
 import { useData, useStore } from '../../store/store';
 import { BarCompare } from '../components/charts';
 import { SourcesDialog } from '../components/SourcesDialog';
+import { Insights } from '../components/Insights';
 import { AmountInput, internalTargetName, Money, ResultParts, SearchCombo } from '../components/common';
 
 export function StatementView() {
@@ -117,6 +118,8 @@ export function StatementView() {
         <div className="card"><h2>Udgifter pr. kategori</h2><BarCompare rows={rowsFor(s.expense, prev?.expense)} nowLabel={view.name} prevLabel={prevP?.name} /></div>
         <div className="card"><h2>Indtægter pr. kategori</h2><BarCompare rows={rowsFor(s.income, prev?.income)} nowLabel={view.name} prevLabel={prevP?.name} /></div>
       </div>
+      <Insights period={view} equityOpen={s.equityOpen} result={s.result} incomeTotal={s.incomeTotal} expenseTotal={s.expenseTotal} />
+
       <p className="small muted row">
         Kontrol: egenkapital primo {kr(s.equityOpen)} + resultat {kr(s.result)}{s.openingInPeriod ? ` + åbningsposter ${kr(s.openingInPeriod)}` : ''} = ultimo {kr(s.equityClose)}{' '}
         {s.equityOpen + s.result + s.openingInPeriod === s.equityClose ? <span className="pos">✓ går op</span> : <span className="neg">✗ går ikke op</span>}
