@@ -97,15 +97,18 @@ function Internal() {
     .filter((i) => !q.trim() || txsOf(i).some((t) => textMatches(t, q)) || (i.kind !== 'pair' && !!i.target && i.target.name.toLowerCase().includes(q.trim().toLowerCase())))
     .sort((a, b) => (txsOf(a)[0].date < txsOf(b)[0].date ? -1 : 1));
 
+  // Teksten åbner transaktionen i Kategorisér; en post (direkte) åbnes i Aktiver & passiver.
   const side = (t: Tx) => (
     <div className="xfer-side">
       <div><b>{acc(t.accountId)?.name}</b> <span className="muted small">{dateShort(t.date)}</span></div>
-      <div className="small ink2 ellipsis" title={t.text}>{t.text}</div>
+      <button className="linkish small ellipsis xfer-txlink" title={`${t.text} – åbn i Kategorisér`} onClick={() => useStore.getState().showTx(t.id)}>{t.text} →</button>
     </div>
   );
-  const expected = (name: string | undefined, note: string) => (
+  const expected = (name: string | undefined, note: string, postId?: string) => (
     <div className="xfer-side expected">
-      <div><b>{name ?? 'Ukendt konto'}</b></div>
+      <div>{postId
+        ? <button className="linkish" style={{ fontWeight: 700 }} title="Se posten og dens bevægelser i Aktiver & passiver" onClick={() => useStore.getState().showPost(postId)}>{name} →</button>
+        : <b>{name ?? 'Ukendt konto'}</b>}</div>
       <div className="small muted">{note}</div>
     </div>
   );
@@ -177,11 +180,11 @@ function Internal() {
                 <div className="xfer-row">
                   {i.kind === 'pair' ? side(i.out) : out ? side(t!)
                     : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `sendt ${dateShort(i.partner.date)} – i forrige periode`)
-                    : expected(i.kind === 'direct' ? i.name : i.target?.name, i.kind === 'direct' ? (i.transit ? 'fra forrige periode' : 'direkte') : 'venter på modpost')}
+                    : expected(i.kind === 'direct' ? i.name : i.target?.name, i.kind === 'direct' ? (i.transit ? 'fra forrige periode' : 'direkte') : 'venter på modpost', i.kind === 'direct' && !i.transit ? i.target?.id : undefined)}
                   <span className="xfer-arrow" aria-hidden>→</span>
                   {i.kind === 'pair' ? side(i.inn) : !out ? side(t!)
                     : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `lander ${dateShort(i.partner.date)} – i næste periode`)
-                    : i.kind === 'direct' ? expected(i.name, i.transit ? 'trækkes fra pengene undervejs' : 'bogføres direkte på posten') : expected(i.target?.name, 'pengene forventes at lande her')}
+                    : i.kind === 'direct' ? expected(i.name, i.transit ? 'trækkes fra pengene undervejs' : 'bogføres direkte på posten', i.transit ? undefined : i.target?.id) : expected(i.target?.name, 'pengene forventes at lande her')}
                   <span className="num"><Money v={amount} decimals /></span>
                   <span>
                     {i.kind === 'pair' ? <span className="chip user" title={i.manual ? 'Parret af dig' : 'Parret automatisk (samme beløb, tæt på hinanden)'}>⇄ Parret{i.manual ? '' : ' auto'}</span>

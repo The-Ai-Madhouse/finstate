@@ -85,3 +85,14 @@ export function transitCandidates(data: AppData, resolved: Map<string, Resolved>
       Number(b.amount === c.remaining) - Number(a.amount === c.remaining) ||
       (a.date < b.date ? -1 : 1));
 }
+
+/**
+ * Transaktionerne i perioden, der flytter penge direkte til/fra en post (fx "Jonas skylder mig" eller et billån) –
+ * de hører sammen via posten.
+ */
+export function postMovements(data: AppData, resolved: Map<string, Resolved>, accountId: string, period: Pick<Period, 'start' | 'end'>): Tx[] {
+  return data.txs
+    .filter((t) => t.date >= period.start && t.date <= period.end && t.accountId !== accountId)
+    .filter((t) => resolved.get(t.id)?.lines.some((l) => l.type === 'internal' && l.targetAccountId === accountId))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}

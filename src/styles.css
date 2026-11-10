@@ -676,3 +676,12 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .cat-inline.newpost { margin-left: 0; }
 .cat-delete { padding: 6px 8px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--critical) 40%, var(--line)); background: color-mix(in srgb, var(--critical) 8%, transparent); }
 @media (hover: none) { .cat-actions { position: static; transform: none; display: inline-flex; background: none; padding: 0; } .cat-row .drag-handle { opacity: 1; } }
+
+/* Kategorisér: det, der hører sammen af sig selv (parret modpost / samme post) */
+.tx-rel { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--line); background: color-mix(in srgb, var(--type-internal) 6%, transparent); max-width: 100%; }
+.tx-rel.warn { background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.tx-rel-label { color: var(--ink-2); font-weight: 600; }
+.tx-rel .linkish { font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-rel-list { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); }
+.xfer-txlink { display: block; max-width: 100%; text-align: left; color: var(--ink-2); }
+.xfer-txlink:hover { color: var(--accent); }

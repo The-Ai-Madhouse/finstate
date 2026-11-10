@@ -34,6 +34,10 @@ interface State {
   /** "Hører sammen med": transaktionen, man er ved at knytte til en anden (klik på den anden i listen). */
   linkPick?: string;
   setLinkPick: (txId?: string) => void;
+  /** Gå til Aktiver & passiver med en post foldet ud. */
+  balanceFocus?: string;
+  showPost: (accountId: string) => void;
+  clearBalanceFocus: () => void;
   setPeriod: (id?: string) => void;
 }
 
@@ -80,6 +84,8 @@ export const useStore = create<State>()(
       showTransfers: (transferFocus) => set({ view: 'transfers', transferFocus }),
       clearTransferFocus: () => set({ transferFocus: undefined }),
       setLinkPick: (linkPick) => set({ linkPick }),
+      showPost: (balanceFocus) => set({ view: 'balance', balanceFocus }),
+      clearBalanceFocus: () => set({ balanceFocus: undefined }),
       setPeriod: (periodId) => set({ periodId }),
     }),
     {

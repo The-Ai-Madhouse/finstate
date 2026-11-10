@@ -1,8 +1,8 @@
-import { TRANSFER_LABEL, transferInfo, type TransferKind } from '../../domain/transfers';
+import { TRANSFER_LABEL, postMovements, transferInfo, type TransferKind } from '../../domain/transfers';
 import { NoPeriod } from '../components/PeriodPrompt';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { KIND_HINT, KIND_LABEL, NO_TYPE, noteFor, suggestCategory, switchKind, typeName, withAccountInPeriods, withValuation } from '../../domain/accountTypes';
-import { kr } from '../../domain/format';
+import { dateShort, kr } from '../../domain/format';
 import type { BsRow } from '../../domain/ledger';
 import type { Account, Period, Valuation } from '../../domain/types';
 import { addDays, uid } from '../../domain/util';
@@ -47,6 +47,14 @@ function BalanceSheet({ period }: { period: Period }) {
   const s = e.statement(period);
   const setView = useStore((st) => st.setView);
   const [open, setOpen] = useState<string>();
+  // Kommer man fra Kategorisér eller Overførsler med en bestemt post: fold den ud og rul hen til den.
+  const focus = useStore((st) => st.balanceFocus);
+  useEffect(() => {
+    if (!focus) return;
+    setOpen(focus);
+    useStore.getState().clearBalanceFocus();
+    setTimeout(() => document.querySelector(`[data-postrow="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
+  }, [focus]);
   // Netop oprettet post: markøren skal stå i det felt, der skal udfyldes.
   const [justAdded, setJustAdded] = useState<string>();
   const [sources, setSources] = useState<SrcReq>();
@@ -154,7 +162,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
   const hasTx = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
   return (
     <Fragment>
-      <tr className={`click ${expanded ? 'expanded' : ''} ${over ? 'drop-over' : ''}`}
+      <tr data-postrow={acc.id} className={`click ${expanded ? 'expanded' : ''} ${over ? 'drop-over' : ''}`}
         onClick={(ev) => { if (!(ev.target as HTMLElement).closest('input,button,select,.drag-handle')) onToggle(); }}
         draggable={draggable}
         onDragStart={(ev) => { dragging = { id: acc.id, side: row.side }; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', acc.id); }}
@@ -489,17 +497,44 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
     if (info) counts[info.kind]++;
   }
   const total = counts.pair + counts.transit + counts.direct + counts.missing;
-  if (!total) return null;
+  const [all, setAll] = useState(false);
+  // Poster, der ikke er importerede bankkonti (fx en person eller et lån): vis bevægelserne – de hører sammen via posten.
+  const imported = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
+  const moves = imported ? [] : postMovements(e.data, e.resolved, acc.id, period);
+  if (!total && !moves.length) return null;
   const KINDS: TransferKind[] = ['pair', 'direct', 'transit', 'missing'];
+  const sign = acc.side === 'asset' ? 1 : -1;
+  const accName = (id: string) => e.data.accounts.find((a) => a.id === id)?.name ?? '';
+  const shown = all ? moves : moves.slice(0, 6);
+  const { showTx, showTransfers } = useStore.getState();
   return (
     <section className="drawer-sec full">
-      <h4>Interne overførsler i {period.name}</h4>
-      <div className="row small" style={{ gap: 8 }}>
+      <h4>{moves.length ? `Bevægelser på posten i ${period.name}` : `Interne overførsler i ${period.name}`}</h4>
+      {moves.length > 0 && (
+        <table className="small post-moves">
+          <tbody>
+            {shown.map((t) => {
+              // Postens side af bevægelsen: penge ud fra banken = posten stiger (fx Jonas skylder mere).
+              const v = -(e.resolved.get(t.id)!.lines.filter((l) => l.type === 'internal' && l.targetAccountId === acc.id).reduce((s, l) => s + l.amount, 0));
+              return (
+                <tr key={t.id}>
+                  <td className="muted" style={{ whiteSpace: 'nowrap' }}>{dateShort(t.date)}</td>
+                  <td className="muted">{accName(t.accountId)}</td>
+                  <td className="ellipsis" style={{ maxWidth: 320 }}><button className="linkish" title="Åbn i Kategorisér" onClick={() => showTx(t.id)}>{t.text}</button>{t.memo && <span className="muted"> · ✎ {t.memo}</span>}</td>
+                  <td className="num"><Money v={v * sign} decimals signed colored inverted={acc.side === 'liability'} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <div className="row small" style={{ gap: 8, marginTop: moves.length ? 6 : 0 }}>
+        {moves.length > 6 && <button className="btn sm ghost" onClick={() => setAll(!all)}>{all ? 'Vis færre' : `Vis alle ${moves.length}`}</button>}
         {KINDS.filter((k) => counts[k]).map((k) => (
           <span key={k} className={`chip ${k === 'pair' ? 'user' : k === 'missing' ? 'review' : ''}`} title={TIP[k]}>{k === 'pair' ? '⇄ ' : ''}{counts[k]} {TRANSFER_LABEL[k].toLowerCase()}</span>
         ))}
         <span className="spacer" />
-        <button className="btn sm" onClick={() => useStore.getState().showTransfers({ accountId: acc.id })}>Se og ret i Overførsler →</button>
+        {total > 0 && <button className="btn sm" onClick={() => showTransfers({ accountId: acc.id })}>Se og ret i Overførsler →</button>}
       </div>
     </section>
   );

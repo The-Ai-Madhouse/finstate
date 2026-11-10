@@ -9,6 +9,7 @@ import { useData, useStore, type View } from '../../store/store';
 import { setMemo, useEngine, usePeriod } from '../../store/actions';
 import { balancesAt, isTransitRef, transitName } from '../../domain/ledger';
 import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
+import { postMovements, transferInfo } from '../../domain/transfers';
 import { dateShort } from '../../domain/format';
 import { KIND_LABEL, NO_TYPE, addAccountType, noteFor, suggestCategory, withAccountInPeriods } from '../../domain/accountTypes';
 import { addDays, uid } from '../../domain/util';
@@ -694,6 +695,7 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
     : [];
   return (
     <>
+      <TxRelations tx={tx} />
       {others.length > 0 && (
         <div className="tx-links" onKeyDown={(ev) => ev.stopPropagation()}>
           <span className="tx-links-label" title="Din egen note om, at transaktionerne hører sammen – ændrer ikke regnskabet">🔗 Hører sammen med</span>
@@ -726,6 +728,61 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * Det, der hører sammen af sig selv: den parrede modpost – eller, for en direkte overførsel til en post
+ * (fx "Jonas skylder mig" eller et billån), periodens andre bevægelser på samme post. Klik for at hoppe.
+ */
+function TxRelations({ tx }: { tx: Tx }) {
+  const e = useEngine();
+  const period = usePeriod();
+  const [open, setOpen] = useState(false);
+  if (!period) return null;
+  const info = transferInfo(e.data, e.resolved, e.txById, tx, period);
+  if (!info) return null;
+  const { showTx, showPost, showTransfers } = useStore.getState();
+  const accName = (id: string) => e.data.accounts.find((a) => a.id === id)?.name ?? '';
+  const txBtn = (t: Tx) => (
+    <button className="linkish" title="Vis transaktionen" onClick={() => showTx(t.id)}>{dateShort(t.date)} {accName(t.accountId)} "{t.text}"</button>
+  );
+  if (info.partner) {
+    return (
+      <div className="tx-rel" onKeyDown={(ev) => ev.stopPropagation()}>
+        <span className="tx-rel-label" title="Den anden side af den interne overførsel">⇄ Parret med</span>
+        {txBtn(info.partner)} <span className="num small">{kr2f(info.partner.amount)}</span>
+        {info.kind === 'transit' && <span className="chip" title="Modposten ligger i en anden periode – pengene er undervejs">anden periode</span>}
+        <button className="tx-link-x" title="Se overførslen på Overførsler-siden" onClick={() => showTransfers({ txId: tx.id })}>Overførsler →</button>
+      </div>
+    );
+  }
+  if (info.kind === 'missing') {
+    return (
+      <div className="tx-rel warn" onKeyDown={(ev) => ev.stopPropagation()}>
+        <span className="tx-rel-label">⇄ Mangler modpost</span>
+        <button className="tx-link-x" title="Find modposten på Overførsler-siden" onClick={() => showTransfers({ txId: tx.id })}>Find den i Overførsler →</button>
+      </div>
+    );
+  }
+  if (info.kind !== 'direct' || !info.target) return null;
+  const target = info.target;
+  const others = postMovements(e.data, e.resolved, target.id, period).filter((t) => t.id !== tx.id);
+  const sum = others.reduce((s, t) => s + t.amount, tx.amount);
+  return (
+    <div className="tx-rel" onKeyDown={(ev) => ev.stopPropagation()}>
+      <span className="tx-rel-label" title="Direkte overførsel til en post – alle bevægelser på posten hører sammen">◆ Via posten</span>
+      <button className="linkish" title="Se posten i Aktiver & passiver" onClick={() => showPost(target.id)}>{target.name}</button>
+      {others.length > 0
+        ? <button className="tx-link-x" aria-expanded={open} onClick={() => setOpen(!open)}>{others.length} {others.length === 1 ? 'anden' : 'andre'} i {period.name} {open ? '▴' : '▾'}</button>
+        : <span className="small muted">ingen andre i {period.name}</span>}
+      {open && (
+        <div className="tx-rel-list">
+          {others.map((t) => <span key={t.id} className="tx-link">{txBtn(t)} <span className="num small">{kr2f(t.amount)}</span></span>)}
+          <span className="small muted">i alt med denne: {kr2f(sum)}</span>
+        </div>
+      )}
+    </div>
   );
 }
 
