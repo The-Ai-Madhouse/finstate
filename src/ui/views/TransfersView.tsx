@@ -2,7 +2,7 @@ import { NoPeriod } from '../components/PeriodPrompt';
 import { useState } from 'react';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
-import type { Account, Classification, Tx } from '../../domain/types';
+import type { Account, Classification, Period, Tx } from '../../domain/types';
 import { textMatches } from '../../domain/txfilter';
 import { dayDiff } from '../../domain/util';
 import { pairTxs, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
@@ -22,9 +22,11 @@ export function TransfersView() {
   );
 }
 
-type Status = 'missing' | 'paired' | 'direct' | 'all';
+type Status = 'missing' | 'paired' | 'transit' | 'direct' | 'all';
 type Item =
   | { kind: 'pair'; key: string; out: Tx; inn: Tx; manual: boolean }
+  /** Modposten ligger i en anden periode: i denne periode er pengene undervejs (eller kom fra forrige periode). */
+  | { kind: 'transit'; key: string; t: Tx; partner: Tx; target?: Account }
   | { kind: 'missing'; key: string; t: Tx; target?: Account }
   | { kind: 'direct'; key: string; t: Tx; target: Account };
 
@@ -40,7 +42,7 @@ function Internal() {
   const isInternal = (t: Tx) => e.resolved.get(t.id)!.lines.some((l) => l.type === 'internal');
   const internal = data.txs.filter((t) => inPeriod(t, period) && t.date > data.settings.bookStart && isInternal(t));
   const st = e.statement(period);
-  const transitRows = st.rows.filter((r) => r.kind === 'transit');
+  const transitRows = st.rows.filter((r) => r.kind === 'transit' && r.close !== 0);
 
   // Byg listen: ét element pr. par (uanset hvilken side der ligger i perioden), ellers pr. transaktion.
   const items: Item[] = [];
@@ -50,7 +52,9 @@ function Internal() {
     const r = e.resolved.get(t.id)!;
     const pair = r.pairId ? e.txById.get(r.pairId) : undefined;
     const target = acc(r.lines.find((l) => l.type === 'internal')?.targetAccountId);
-    if (pair) {
+    if (pair && !inPeriod(pair, period)) {
+      items.push({ kind: 'transit', key: t.id, t, partner: pair, target });
+    } else if (pair) {
       seen.add(pair.id);
       const [out, inn] = t.amount < 0 ? [t, pair] : [pair, t];
       items.push({ kind: 'pair', key: `${out.id}|${inn.id}`, out, inn, manual: t.pairWith === pair.id });
@@ -58,7 +62,7 @@ function Internal() {
       items.push({ kind: 'direct', key: t.id, t, target });
     } else items.push({ kind: 'missing', key: t.id, t, target });
   }
-  const count = { missing: 0, paired: 0, direct: 0, all: items.length };
+  const count = { missing: 0, paired: 0, transit: 0, direct: 0, all: items.length };
   for (const i of items) count[i.kind === 'pair' ? 'paired' : i.kind]++;
 
   const [status, setStatus] = useState<Status>(() => (count.missing ? 'missing' : 'all'));
@@ -74,7 +78,7 @@ function Internal() {
 
   const side = (t: Tx) => (
     <div className="xfer-side">
-      <div><b>{acc(t.accountId)?.name}</b> <span className="muted small">{dateShort(t.date)}</span>{!inPeriod(t, period) && <span className="chip review" style={{ marginLeft: 4 }}>{t.date > period.end ? 'næste periode' : 'forrige periode'}</span>}</div>
+      <div><b>{acc(t.accountId)?.name}</b> <span className="muted small">{dateShort(t.date)}</span></div>
       <div className="small ink2 ellipsis" title={t.text}>{t.text}</div>
     </div>
   );
@@ -87,6 +91,7 @@ function Internal() {
   const SEG: { id: Status; label: string }[] = [
     { id: 'missing', label: `Mangler modpost (${count.missing})` },
     { id: 'paired', label: `Parret (${count.paired})` },
+    ...(count.transit ? [{ id: 'transit' as Status, label: `Undervejs (${count.transit})` }] : []),
     { id: 'direct', label: `Direkte til post (${count.direct})` },
     { id: 'all', label: `Alle (${count.all})` },
   ];
@@ -128,22 +133,28 @@ function Internal() {
             return (
               <div key={i.key} className={`xfer-item ${i.kind} ${editing === i.key ? 'editing' : ''}`}>
                 <div className="xfer-row">
-                  {i.kind === 'pair' ? side(i.out) : out ? side(t!) : expected(i.kind === 'direct' ? i.target.name : i.target?.name, i.kind === 'direct' ? 'direkte' : 'venter på modpost')}
+                  {i.kind === 'pair' ? side(i.out) : out ? side(t!)
+                    : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `sendt ${dateShort(i.partner.date)} – i forrige periode`)
+                    : expected(i.kind === 'direct' ? i.target.name : i.target?.name, i.kind === 'direct' ? 'direkte' : 'venter på modpost')}
                   <span className="xfer-arrow" aria-hidden>→</span>
-                  {i.kind === 'pair' ? side(i.inn) : !out ? side(t!) : i.kind === 'direct' ? expected(i.target.name, 'bogføres direkte på posten') : expected(i.target?.name, 'pengene forventes at lande her')}
+                  {i.kind === 'pair' ? side(i.inn) : !out ? side(t!)
+                    : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `lander ${dateShort(i.partner.date)} – i næste periode`)
+                    : i.kind === 'direct' ? expected(i.target.name, 'bogføres direkte på posten') : expected(i.target?.name, 'pengene forventes at lande her')}
                   <span className="num"><Money v={amount} decimals /></span>
                   <span>
                     {i.kind === 'pair' ? <span className="chip user" title={i.manual ? 'Parret af dig' : 'Parret automatisk (samme beløb, tæt på hinanden)'}>⇄ Parret{i.manual ? '' : ' auto'}</span>
                       : i.kind === 'direct' ? <span className="chip">Direkte</span>
+                      : i.kind === 'transit' ? <span className="chip" title="Modposten ligger i en anden periode – i denne periode står beløbet som penge undervejs">{out ? 'Undervejs' : 'Fra forrige periode'}</span>
                       : <span className="chip review">Mangler modpost</span>}
                     {i.kind === 'pair' && Math.abs(dayDiff(i.out.date, i.inn.date)) > 0 && <span className="small muted"> {Math.abs(dayDiff(i.out.date, i.inn.date))} dage</span>}
                   </span>
                   <span className="row xfer-actions">
                     {i.kind === 'pair' && <button className="btn sm ghost" title="De to hører ikke sammen" onClick={() => unpairTxs(i.out.id, i.inn.id)}>Ophæv</button>}
+                    {i.kind === 'transit' && <button className="btn sm ghost" title="De to hører ikke sammen" onClick={() => unpairTxs(i.t.id, i.partner.id)}>Ophæv</button>}
                     <button className={`btn sm ${editing === i.key ? '' : 'ghost'}`} onClick={() => setEditing(editing === i.key ? undefined : i.key)}>{editing === i.key ? 'Luk' : 'Ret'}</button>
                   </span>
                 </div>
-                {i.kind === 'missing' && <PairPicker t={i.t} />}
+                {i.kind === 'missing' && <PairPicker t={i.t} period={period} />}
                 {editing === i.key && (
                   <div className="xfer-edit">
                     {txsOf(i).map((x) => <TxEdit key={x.id} t={x} />)}
@@ -159,12 +170,13 @@ function Internal() {
 }
 
 /** Mangler modpost: forslag med samme beløb – eller søg selv blandt de andre kontis transaktioner. */
-function PairPicker({ t }: { t: Tx }) {
+function PairPicker({ t, period }: { t: Tx; period: Period }) {
   const e = useEngine();
   const { data } = e;
   const acc = (id?: string) => data.accounts.find((a) => a.id === id)?.name ?? '';
   const pool = data.txs
-    .filter((o) => o.accountId !== t.accountId && Math.sign(o.amount) === -Math.sign(t.amount) && Math.abs(dayDiff(t.date, o.date)) <= 60 && !e.resolved.get(o.id)!.pairId)
+    // Kun transaktioner i samme financial statement.
+    .filter((o) => inPeriod(o, period) && o.accountId !== t.accountId && Math.sign(o.amount) === -Math.sign(t.amount) && Math.abs(dayDiff(t.date, o.date)) <= 60 && !e.resolved.get(o.id)!.pairId)
     .sort((a, b) => (Math.abs(a.amount) === Math.abs(t.amount) ? 0 : 1) - (Math.abs(b.amount) === Math.abs(t.amount) ? 0 : 1) || Math.abs(dayDiff(t.date, a.date)) - Math.abs(dayDiff(t.date, b.date)));
   const exact = pool.filter((o) => o.amount === -t.amount).slice(0, 2);
   const options = pool.slice(0, 300).map((o) => ({ id: o.id, label: `${dateShort(o.date)} · ${acc(o.accountId)} · ${o.text}`, hint: `${kr(Math.abs(o.amount))}${o.amount !== -t.amount ? ' (andet beløb)' : ''}` }));

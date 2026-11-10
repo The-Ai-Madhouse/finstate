@@ -2,9 +2,9 @@
  * Afstemning af poster, der følger overførsler (udlæg, tilgodehavender, gæld til personer):
  * hvilke bevægelser hører sammen, og går de op?
  */
-import { isBalanceRef, type Ledger } from './ledger';
-import type { Account, AppData, Match } from './types';
-import { dayDiff, uid } from './util';
+import { balancesAt, isBalanceRef, type Ledger } from './ledger';
+import type { Account, AppData, Match, Period } from './types';
+import { addDays, dayDiff, uid } from './util';
 
 export interface SettleItem {
   key: string;
@@ -15,6 +15,8 @@ export interface SettleItem {
   txId?: string;
   openItemId?: string;
   matchId?: string;
+  /** Saldoen fra før perioden, samlet i én linje (kan parres med periodens bevægelser). */
+  primo?: boolean;
 }
 
 export interface SettleGroup {
@@ -23,8 +25,26 @@ export interface SettleGroup {
   sum: number;
 }
 
-/** Alle bevægelser på posten (transaktioner og åbne poster), én pr. transaktion. */
-export function settleItems(data: AppData, ledger: Ledger, accountId: string): SettleItem[] {
+/** Nøglen for "saldo primo" i en periode. */
+export const primoKey = (p: Pick<Period, 'start'>) => `primo:${p.start}`;
+
+/**
+ * Bevægelserne på posten (transaktioner og åbne poster), én pr. transaktion.
+ * Med en periode: KUN periodens bevægelser – alt fra før perioden står samlet som "Saldo primo".
+ */
+export function settleItems(data: AppData, ledger: Ledger, accountId: string, period?: Pick<Period, 'start' | 'end'>): SettleItem[] {
+  const all = allItems(data, ledger, accountId);
+  if (!period) return all;
+  const ref = `acc:${accountId}`;
+  const before = addDays(period.start, -1);
+  const primo = balancesAt(ledger, before).get(ref) ?? 0;
+  const key = primoKey(period);
+  const matchId = (data.matches ?? []).find((m) => m.accountId === accountId && m.keys.includes(key))?.id;
+  const inP = all.filter((i) => i.date >= period.start && i.date <= period.end);
+  return primo ? [{ key, date: before, text: 'Saldo primo – fra før perioden', amount: primo, primo: true, matchId }, ...inP] : inP;
+}
+
+function allItems(data: AppData, ledger: Ledger, accountId: string): SettleItem[] {
   const ref = `acc:${accountId}`;
   const byKey = new Map<string, SettleItem>();
   const matchOf = new Map<string, string>();
@@ -49,10 +69,15 @@ export function settleItems(data: AppData, ledger: Ledger, accountId: string): S
 export const isSettled = (d: Pick<AppData, 'matches'>, a: Pick<Account, 'id' | 'settle' | 'kind'>) =>
   a.kind === 'tracked' && (a.settle ?? (d.matches ?? []).some((m) => m.accountId === a.id));
 
-export function settleState(data: AppData, ledger: Ledger, accountId: string) {
-  const items = settleItems(data, ledger, accountId);
+export function settleState(data: AppData, ledger: Ledger, accountId: string, period?: Pick<Period, 'start' | 'end'>) {
+  const items = settleItems(data, ledger, accountId, period);
+  // En gruppe hører kun til perioden, hvis ALLE dens bevægelser ligger i perioden (eller er periodens saldo primo).
+  // Grupper på tværs af perioder vises ikke – deres bevægelser står som uparrede her.
+  const inScope = new Set(items.map((i) => i.key));
+  const existing = period ? new Set(allItems(data, ledger, accountId).map((i) => i.key)) : inScope;
+  const valid = (m: Match) => m.keys.every((k) => inScope.has(k) || (!existing.has(k) && !k.startsWith('primo:')));
   const groups: SettleGroup[] = (data.matches ?? [])
-    .filter((m) => m.accountId === accountId)
+    .filter((m) => m.accountId === accountId && valid(m))
     .map((match) => {
       const its = items.filter((i) => i.matchId === match.id);
       return { match, items: its, sum: its.reduce((s, i) => s + i.amount, 0) };
@@ -101,14 +126,16 @@ export function unpair(d: AppData, matchId: string, key?: string): AppData {
  * Afskriv gruppens difference som indtægt/udgift (fx "Jonas betalte 50 kr for lidt – lad det gå"):
  * en åben post med kategori, der bringer gruppen i 0, dateret ved gruppens seneste bevægelse.
  */
-export function writeOffDifference(d: AppData, ledger: Ledger, matchId: string, categoryId: string): AppData {
+export function writeOffDifference(d: AppData, ledger: Ledger, matchId: string, categoryId: string, period?: Pick<Period, 'start' | 'end'>): AppData {
   const m = d.matches.find((x) => x.id === matchId);
   if (!m) return d;
   const acc = d.accounts.find((a) => a.id === m.accountId);
-  const g = settleState(d, ledger, m.accountId).groups.find((x) => x.match.id === matchId);
+  const g = settleState(d, ledger, m.accountId, period).groups.find((x) => x.match.id === matchId);
   if (!g || !g.sum || !acc) return d;
   const id = uid('oi');
-  const date = g.items[g.items.length - 1].date;
+  // Afskrivningen bogføres i perioden – aldrig før den (fx hvis gruppen kun er saldo primo).
+  const last = g.items[g.items.length - 1].date;
+  const date = period && last < period.start ? period.start : last;
   return {
     ...d,
     openItems: [...d.openItems, { id, date, counterparty: acc.name, accountId: acc.id, amount: -g.sum, categoryId, note: 'Afskrevet difference' }],

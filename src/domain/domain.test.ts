@@ -733,3 +733,31 @@ describe('egne parringer af interne overførsler', () => {
     expect(r.get(later.id)!.pairId).toBe(out.id);
   });
 });
+
+describe('afstemning holder sig til perioden', () => {
+  it('shows only the period\'s movements plus one "saldo primo" line, and ignores groups across periods', async () => {
+    const { settleState, primoKey, pairItems } = await import('./settle');
+    const d = demoData();
+    const e = buildEngine(d);
+    const [y25, y26] = d.periods;
+    const s25 = settleState(d, e.ledger, 'acc-jonas', y25);
+    // Startsaldoen (fra før 2025) står som saldo primo; tilbagebetalingen i august er periodens eneste bevægelse.
+    expect(s25.items.map((i) => [i.key.split(':')[0], i.amount])).toEqual([['primo', 20000], ['tx', -20000]]);
+    expect(s25.suggestions).toHaveLength(1);
+    // 2026: intet fra 2025 dukker op.
+    expect(settleState(d, e.ledger, 'acc-jonas', y26).items).toEqual([]);
+    // Par saldo primo med tilbagebetalingen → gruppen går op i 2025.
+    const d2 = pairItems(d, 'acc-jonas', s25.items.map((i) => i.key));
+    expect(settleState(d2, e.ledger, 'acc-jonas', y25).groups.map((g) => g.sum)).toEqual([0]);
+    expect(d2.matches[0].keys[0]).toBe(primoKey(y25));
+    // En gruppe på tværs af perioder vises ikke – bevægelserne står som uparrede i begge perioder.
+    const mp26 = d.txs.find((t) => t.text === 'MobilePay Jonas Lind' && t.date >= '2026-01-01')!;
+    const d3 = { ...d, txs: d.txs.map((t) => (t.id === mp26.id ? { ...t, manual: { type: 'internal' as const, targetAccountId: 'acc-jonas' } } : t)) };
+    const e3 = buildEngine(d3);
+    const cross = { ...d3, matches: [{ id: 'm', accountId: 'acc-jonas', keys: [s25.items[1].key, `tx:${mp26.id}`] }] };
+    expect(settleState(cross, e3.ledger, 'acc-jonas', y25).groups).toEqual([]);
+    expect(settleState(cross, e3.ledger, 'acc-jonas', y25).open.map((i) => i.key)).toContain(s25.items[1].key);
+    expect(settleState(cross, e3.ledger, 'acc-jonas', y26).items.map((i) => i.key)).toEqual([`tx:${mp26.id}`]);
+    expect(settleState(cross, e3.ledger, 'acc-jonas', y26).groups).toEqual([]);
+  });
+});

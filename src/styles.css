@@ -617,3 +617,7 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 .xfer-edit-line { display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 1000px) { .xfer-row { grid-template-columns: 1fr; } .xfer-arrow { display: none; } }
 .xfer-pick .combo { min-width: 300px; }
+
+/* Afstemning: saldo fra før perioden */
+tr.settle-primo td { font-style: italic; color: var(--ink-2); }
+.xfer-item.transit { border-left-color: var(--accent); }
