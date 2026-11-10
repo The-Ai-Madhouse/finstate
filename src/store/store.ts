@@ -19,6 +19,8 @@ interface State {
   /** Kategorisér: søgning og filtre huskes, når man går væk og kommer tilbage. */
   ledgerFilter: LedgerFilter;
   setLedgerFilter: (patch: Partial<LedgerFilter>) => void;
+  /** Nulstil alle filtre (konto, kategori, datoer, beløb …) – sorteringen bevares. */
+  resetLedgerFilter: () => void;
   update: (recipe: (d: AppData) => AppData) => void;
   replaceAll: (d: AppData) => void;
   markExported: () => void;
@@ -54,6 +56,7 @@ export const useStore = create<State>()(
       view: 'overview',
       ledgerFilter: DEFAULT_LEDGER_FILTER,
       setLedgerFilter: (patch) => set((s) => ({ ledgerFilter: { ...s.ledgerFilter, ...patch } })),
+      resetLedgerFilter: () => set((s) => ({ ledgerFilter: { ...DEFAULT_LEDGER_FILTER, sort: s.ledgerFilter.sort } })),
       update: (recipe) =>
         set((s) => {
           const d = withAutoBookStart(recipe(s.data));

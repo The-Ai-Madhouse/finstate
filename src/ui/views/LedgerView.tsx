@@ -5,7 +5,7 @@ import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
-import { DEFAULT_LEDGER_FILTER, useStore, type LedgerFilter } from '../../store/store';
+import { useStore, type LedgerFilter } from '../../store/store';
 import { activeFilterCount, filterTxs } from '../../domain/txfilter';
 import { ChronoReview } from './ChronoReview';
 import { SplitDialog } from '../components/SplitDialog';
@@ -34,7 +34,6 @@ function LedgerInner() {
   const focusTxId = useStore((s) => s.focusTxId);
   // Filtre ligger i store, så de er der stadig, når man kommer tilbage.
   const filter = useStore((s) => s.ledgerFilter);
-  const setFilter = useStore((s) => s.setLedgerFilter);
   const setPeriod = useStore((s) => s.setPeriod);
   const e = useEngine();
   const period = usePeriod()!;
@@ -55,7 +54,7 @@ function LedgerInner() {
     if (!inPeriod(t, period)) { const p = data.periods.find((x) => inPeriod(t, x)); if (p) setPeriod(p.id); }
     // Ville filtrene skjule den, så nulstil dem (sorteringen bevares).
     const f = useStore.getState().ledgerFilter;
-    if (!filterTxs([t], e.resolved, data.categories, f).length) setFilter({ ...DEFAULT_LEDGER_FILTER, sort: f.sort });
+    if (!filterTxs([t], e.resolved, data.categories, f).length) useStore.getState().resetLedgerFilter();
   }, [focusTxId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const review = txs.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source));
@@ -98,6 +97,7 @@ function LedgerInner() {
 function FilterBar({ total, shown }: { total: number; shown: number }) {
   const f = useStore((s) => s.ledgerFilter);
   const set = useStore((s) => s.setLedgerFilter);
+  const reset = useStore((s) => s.resetLedgerFilter);
   const [more, setMore] = useState(() => !!(f.from || f.to || f.min || f.max || f.withNote));
   const ref = useRef<HTMLDivElement>(null);
   const n = activeFilterCount(f);
@@ -137,7 +137,7 @@ function FilterBar({ total, shown }: { total: number; shown: number }) {
         <button className={`btn sm ghost ${more ? 'on' : ''}`} onClick={() => setMore(!more)}>{more ? 'Færre filtre ▴' : 'Dato, beløb, kommentar ▾'}</button>
         <span className="spacer" />
         <span className="muted">Viser {shown} af {total}</span>
-        {n > 0 && <button className="btn sm ghost" onClick={() => set({ ...DEFAULT_LEDGER_FILTER, sort: f.sort })}>Nulstil filtre ({n})</button>}
+        {n > 0 && <button className="btn sm ghost" onClick={reset}>Nulstil filtre ({n})</button>}
       </div>
       {more && (
         <div className="row small">
