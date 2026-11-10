@@ -23,10 +23,27 @@ export function SplitDialog({ tx, resolved, onClose, onSaved }: { tx: Tx; resolv
   );
   const [remember, setRemember] = useState(false);
   const rulesOn = useStore((s) => s.data.settings.rulesEnabled === true);
+  const categories = useStore((s) => s.data.categories);
   const [focusIdx, setFocusIdx] = useState(initial.length > 1 ? -1 : 0);
   const listRef = useRef<HTMLDivElement>(null);
   const restAmt = total - parts.reduce((s, p) => s + p.amt, 0);
-  const ok = restAmt >= 0 && parts.length > 0 && parts.every((p) => p.amt > 0 && isComplete(p.cls)) && (restAmt === 0 || isComplete(rest));
+  // Resten med fortegn: er delene større end beløbet, går resten den anden vej (fx en udgift, hvor resten bliver en indtægt).
+  const restSigned = sign * restAmt;
+  const restDir: 'income' | 'expense' = (restSigned === 0 ? tx.amount : restSigned) > 0 ? 'income' : 'expense';
+  const flipped = restAmt < 0;
+  const ok = parts.length > 0 && parts.every((p) => p.amt > 0 && isComplete(p.cls)) && (restAmt === 0 || isComplete(rest));
+
+  // Skifter resten retning, skifter dens type med (indtægt ↔ udgift). En kategori, der går begge veje, bevares.
+  // Det sidste valg for hver retning huskes, så man ikke mister det, hvis man skriver sig forbi og retter igen.
+  const memo = useRef<Partial<Record<'income' | 'expense', Classification>>>({});
+  useEffect(() => {
+    setRest((r) => {
+      if ((r.type !== 'income' && r.type !== 'expense') || r.type === restDir) return r;
+      memo.current[r.type] = r;
+      const cat = categories.find((c) => c.id === r.categoryId);
+      return memo.current[restDir] ?? { type: restDir, categoryId: cat?.kind === 'both' ? cat.id : undefined };
+    });
+  }, [restDir, categories]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose(); };
@@ -51,13 +68,16 @@ export function SplitDialog({ tx, resolved, onClose, onSaved }: { tx: Tx; resolv
           <button className="btn sm ghost" onClick={onClose} aria-label="Luk">✕</button>
         </div>
         <p className="small ink2" style={{ marginBottom: 12 }}>
-          {kr(tx.amount)} fordelt på flere dele. Skriv beløbet for hver del – <b>resten</b> regnes automatisk.
+          {kr(total)} {sign < 0 ? 'ud' : 'ind'} fordelt på flere dele. Skriv beløbet for hver del – <b>resten</b> regnes automatisk.
         </p>
 
         <div className="split-list" ref={listRef}>
           <div className="split-line rest">
-            <div className="split-amt"><span className="small muted">Resten</span><b className={restAmt < 0 ? 'neg' : ''}><Money precise v={sign * restAmt} /></b></div>
-            <ClassEditor value={rest} onChange={setRest} amount={sign * Math.max(restAmt, 1)} accountId={tx.accountId} compact />
+            <div className="split-amt">
+              <span className="small muted">Resten{restAmt ? ` · ${restDir === 'income' ? 'ind' : 'ud'}` : ''}</span>
+              <b><Money precise v={Math.abs(restAmt)} /></b>
+            </div>
+            <ClassEditor key={restDir} value={rest} onChange={setRest} amount={restSigned || sign} accountId={tx.accountId} compact />
             <span />
           </div>
           {parts.map((p, i) => (
@@ -79,7 +99,7 @@ export function SplitDialog({ tx, resolved, onClose, onSaved }: { tx: Tx; resolv
           {rulesOn && <label className="row small ink2" title="De faste beløb huskes for samme tekst; resten følger beløbet. Godt til fx en løn, hvor en fast del går til pension.">
             <input type="checkbox" checked={remember} onChange={(ev) => setRemember(ev.target.checked)} /> Husk opdelingen fremover
           </label>}
-          <span className={`small ${restAmt < 0 ? 'neg' : 'muted'}`}>{restAmt < 0 ? `Delene er ${kr(-restAmt)} for store` : ''}</span>
+          <span className="small ink2">{flipped ? `Delene er ${kr(-restAmt)} større end beløbet – resten bliver ${restDir === 'income' ? 'en indtægt' : 'en udgift'}.` : ''}</span>
           <span className="spacer" />
           {(tx.splits?.length ?? 0) > 0 && <button className="btn sm ghost" onClick={() => { setSplits(tx.id, undefined); onClose(); }}>Fjern opdeling</button>}
           <button className="btn sm" onClick={onClose}>Annullér</button>

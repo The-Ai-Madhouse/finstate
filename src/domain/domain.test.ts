@@ -680,3 +680,21 @@ describe('underkategorier i flere niveauer', () => {
     expect(filterTxs(d.txs, e.resolved, categories, f).map((t) => t.id).sort()).toEqual(['t1', 't2']);
   });
 });
+
+describe('opdeling større end beløbet', () => {
+  it('lets the rest go the other way (an expense whose rest becomes income) and still balances', () => {
+    const d = demoData();
+    const tx = d.txs.find((t) => t.text.startsWith('Kortkøb Café Solsikke') && t.date >= '2025-01-01')!;
+    const out = -tx.amount; // fx 100 kr ud
+    const splits = [
+      { type: 'income' as const, categoryId: 'in-diverse-indtaegter', amount: 5000 },
+      { type: 'internal' as const, targetAccountId: 'acc-jonas', amount: -(out + 5000) },
+    ];
+    const d2 = { ...d, txs: d.txs.map((t) => (t.id === tx.id ? { ...t, splits } : t)) };
+    const e = buildEngine(d2);
+    expect(e.resolved.get(tx.id)!.lines.map((l) => l.amount)).toEqual([5000, -(out + 5000)]);
+    const s = e.statement(d2.periods[0]);
+    expect(s.income.find((c) => c.id === 'in-diverse-indtaegter')!.amount).toBe(5000);
+    expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
+  });
+});
