@@ -640,3 +640,10 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .xfer-legend dd { margin: 0; }
 .fold-head h2 { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--surface); font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 10px; border-radius: 4px; line-height: 1.35; }
 .card-head > .fold-head { flex: 1 1 auto; }
+
+/* "Hører sammen med": vælg den anden transaktion ved at klikke på den i listen */
+.link-banner { margin: 0; padding: 6px 10px; font-size: 13px; }
+.link-target { cursor: copy; outline: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
+.link-target:hover { background: color-mix(in srgb, var(--accent) 14%, transparent) !important; outline: 2px solid var(--accent); }
+.link-target *:not(td) { pointer-events: none; }
+.link-source { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }

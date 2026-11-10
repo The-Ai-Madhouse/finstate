@@ -12,7 +12,7 @@ import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
 import { saveRule, setManual, useEngine, usePeriod } from '../../store/actions';
-import { AccountSelect, CategoryCombo, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
+import { AccountSelect, CategoryCombo, LinkPickBanner, linkTargetProps, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
 
 const clsOf = (r: Resolved): Classification => {
   const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
@@ -116,6 +116,7 @@ function FilterBar({ total, shown }: { total: number; shown: number }) {
   );
   return (
     <div className="filter-bar" ref={ref}>
+      <LinkPickBanner />
       <div className="row">
         <div className="search-wrap grow">
           <input className="search-input" placeholder="Søg i tekst, noter, kommentarer, bankkategori eller beløb (fx 1.234,50)…" value={f.q}
@@ -267,6 +268,7 @@ function GroupRow({ txs }: { txs: Tx[] }) {
 
 function TxTable({ txs }: { txs: Tx[] }) {
   const e = useEngine();
+  const linkPick = useStore((st) => st.linkPick);
   const [limit, setLimit] = useState(150);
   const [splitTx, setSplitTx] = useState<string>();
   const accName = (id: string) => e.data.accounts.find((a) => a.id === id)?.name ?? id;
@@ -295,7 +297,7 @@ function TxTable({ txs }: { txs: Tx[] }) {
             {txs.slice(0, limit).flatMap((t) => {
               const r = e.resolved.get(t.id)!;
               const rows = [
-                <tr key={t.id} data-ledgerrow={t.id} tabIndex={0} onKeyDown={(ev) => onKey(ev, t, r)}>
+                <tr key={t.id} data-ledgerrow={t.id} tabIndex={0} onKeyDown={(ev) => onKey(ev, t, r)} {...linkTargetProps(linkPick, t.id)}>
                   <td className="small">{dateShort(t.date)}</td>
                   <td className="small muted">{accName(t.accountId)}</td>
                   <td style={{ maxWidth: 320 }}>

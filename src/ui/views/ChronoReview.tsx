@@ -7,7 +7,7 @@ import { setManual, useEngine, usePeriod } from '../../store/actions';
 import { inPeriod } from '../../domain/engine';
 import { SimilarDialog } from '../components/SimilarDialog';
 import { SplitDialog } from '../components/SplitDialog';
-import { ClassEditor, Empty, Money, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
+import { ClassEditor, Empty, Money, linkTargetProps, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
 import { Confetti } from '../components/Confetti';
 import { useStore } from '../../store/store';
 
@@ -267,12 +267,15 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
   };
 
   const acc = e.data.accounts.find((a) => a.id === tx.accountId);
+  // "Hører sammen med": mens man vælger, kan rækken klikkes for at blive knyttet til den valgte.
+  const lt = linkTargetProps(useStore((st) => st.linkPick), tx.id);
   const period = usePeriod();
   // Knappen tæller kun lignende i det aktuelle financial statement (andre perioder kan vises i vinduet).
   const nSimilar = period ? similar.filter((t) => inPeriod(t, period)).length : similar.length;
   const similarLabel = `Lignende (${nSimilar}${nSimilar < similar.length ? `+${similar.length - nSimilar}` : ''})`;
   return (
-    <div className={`chrono-row ${open ? 'open' : 'done'} ${flash ? 'flash' : ''} ${targeted ? 'targeted' : ''}`} tabIndex={0} data-txrow={tx.id} data-pending={isPending} onKeyDown={onKey}>
+    <div className={`chrono-row ${open ? 'open' : 'done'} ${flash ? 'flash' : ''} ${targeted ? 'targeted' : ''} ${lt.className}`} tabIndex={0} data-txrow={tx.id} data-pending={isPending} onKeyDown={onKey}
+      title={lt.title} onClickCapture={lt.onClickCapture}>
       <div className="small ink2">{dateShort(tx.date)}<div className="muted ellipsis">{acc?.name}</div></div>
       <div style={{ minWidth: 0 }}>
         <div className="ellipsis" title={tx.text}><b>{tx.text}</b></div>

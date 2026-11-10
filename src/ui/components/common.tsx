@@ -642,7 +642,10 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   const update = useStore((s) => s.update);
   const showTx = useStore((s) => s.showTx);
   const period = usePeriod();
-  const [adding, setAdding] = useState(false);
+  // Kun én ad gangen: den transaktion, man knytter fra, står i store – så man også kan klikke på den anden i listen.
+  const adding = useStore((s) => s.linkPick === tx.id);
+  const setLinkPick = useStore((s) => s.setLinkPick);
+  const setAdding = (on: boolean) => setLinkPick(on ? tx.id : undefined);
   const others = linkedWith(txs, tx);
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
   const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '';
@@ -672,9 +675,10 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
       {adding ? (
         <span className="tx-link-add" onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') setAdding(false); }}>
           <SearchCombo className="sm" options={options} value={undefined} placeholder="Hører sammen med…" searchPlaceholder="Søg dato, tekst eller beløb…"
-            ariaLabel="Hører sammen med" emptyText="Ingen transaktion matcher"
+            ariaLabel="Hører sammen med" emptyText="Ingen transaktion matcher – eller klik på den i listen"
             onChange={(id) => { if (id) { update((d) => linkTxs(d, tx.id, id)); setAdding(false); } }} />
           <button className="btn sm ghost" onClick={() => setAdding(false)} aria-label="Annullér">✕</button>
+          <span className="small muted">eller klik på den i listen</span>
         </span>
       ) : (
         <span className="row" style={{ gap: 10 }}>
@@ -738,6 +742,47 @@ export function ResultParts({ parts, categories }: { parts: Map<string, number>;
         const name = ref.startsWith('cat:') ? categoryLabel(categories, ref.slice(4)) : 'ukategoriseret';
         return <div key={ref}>heraf {name} {kr(Math.abs(v))}</div>;
       })}
+    </div>
+  );
+}
+
+/**
+ * Mens man vælger "hører sammen med": rækkerne i listen kan klikkes for at knytte dem til den valgte transaktion.
+ * Bruges på både gennemgangens rækker og den grupperede tabel.
+ */
+export function linkTargetProps(pick: string | undefined, txId: string) {
+  if (!pick || pick === txId) return { className: pick === txId ? 'link-source' : '' };
+  return {
+    className: 'link-target',
+    title: 'Klik for at knytte til den valgte transaktion',
+    onClickCapture: (ev: React.MouseEvent) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const { update, setLinkPick } = useStore.getState();
+      update((d) => linkTxs(d, pick, txId));
+      setLinkPick(undefined);
+    },
+  };
+}
+
+/** Banner øverst, mens man vælger: hvilken transaktion man knytter fra – og Esc/Annullér. */
+export function LinkPickBanner() {
+  const pick = useStore((s) => s.linkPick);
+  const tx = useStore((s) => s.data.txs.find((t) => t.id === s.linkPick));
+  const setLinkPick = useStore((s) => s.setLinkPick);
+  useEffect(() => {
+    if (!pick) return;
+    // I "capture"-fasen, så Esc også annullerer, når markøren står i søgefeltet (som ellers selv fanger Esc).
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setLinkPick(undefined); };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [pick, setLinkPick]);
+  if (!pick || !tx) return null;
+  return (
+    <div className="banner info link-banner">
+      🔗 Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) hører sammen med – eller søg den frem i søgefeltet.
+      <span className="spacer" />
+      <button className="btn sm" onClick={() => setLinkPick(undefined)}>Annullér (Esc)</button>
     </div>
   );
 }

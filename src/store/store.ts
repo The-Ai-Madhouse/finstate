@@ -31,6 +31,9 @@ interface State {
   transferFocus?: { accountId?: string; txId?: string };
   showTransfers: (focus: { accountId?: string; txId?: string }) => void;
   clearTransferFocus: () => void;
+  /** "Hører sammen med": transaktionen, man er ved at knytte til en anden (klik på den anden i listen). */
+  linkPick?: string;
+  setLinkPick: (txId?: string) => void;
   setPeriod: (id?: string) => void;
 }
 
@@ -76,6 +79,7 @@ export const useStore = create<State>()(
       clearFocusTx: () => set({ focusTxId: undefined }),
       showTransfers: (transferFocus) => set({ view: 'transfers', transferFocus }),
       clearTransferFocus: () => set({ transferFocus: undefined }),
+      setLinkPick: (linkPick) => set({ linkPick }),
       setPeriod: (periodId) => set({ periodId }),
     }),
     {
