@@ -82,14 +82,16 @@ function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, 
   };
   return (
     <div
-      className="row newcat"
-      style={{ flexWrap: 'nowrap' }}
+      className="row newcat newpost"
       // Enter/Escape må ikke boble op til fx gennemgangens "gem og gå videre".
       onKeyDown={(e) => {
         if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); create(); }
         if (e.key === 'Escape') { e.stopPropagation(); onDone(); }
       }}
     >
+      <span className="small ink2">Ny kategori:</span>
+      <input className="sm grow" autoFocus placeholder={parent ? 'Navn på underkategori' : 'Navn på kategori'} value={name} onChange={(e) => setName(e.target.value)} aria-label="Navn på kategori"
+        style={dup ? { borderColor: 'var(--critical)' } : undefined} title={dup ? 'Findes allerede' : undefined} />
       {!fixedKind && (
         <select className="sm" value={kind} onChange={(e) => { setKind(e.target.value as Category['kind']); setParent(''); }} aria-label="Indtægt eller udgift"
           title="Begge veje: fx renter eller afkast – positivt beløb er indtægt, negativt er udgift">
@@ -102,8 +104,6 @@ function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, 
         <option value="">Ny hovedkategori</option>
         {tops.map((t) => <option key={t.id} value={t.id}>Under {t.name}</option>)}
       </select>
-      <input className="sm grow" autoFocus placeholder={parent ? 'Navn på underkategori' : 'Navn på kategori'} value={name} onChange={(e) => setName(e.target.value)}
-        style={dup ? { borderColor: 'var(--critical)' } : undefined} title={dup ? 'Findes allerede' : undefined} />
       <button className="btn sm primary" disabled={!name.trim() || dup} onClick={create}>Opret</button>
       <button className="btn sm ghost" onClick={() => onDone()} aria-label="Annullér">✕</button>
     </div>

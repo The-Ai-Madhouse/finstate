@@ -544,7 +544,8 @@ table.bs tr.drop-over td { box-shadow: inset 0 2px 0 var(--accent); }
 /* "+ Ny post" i kategoriseringen: egen linje i fuld bredde, bryder om i stedet for at flyde ud over knapperne */
 .class-editor { flex-wrap: wrap; min-width: 0; }
 .newpost { flex-basis: 100%; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 6px 8px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface-2); }
-.newpost input[aria-label="Navn på post"] { min-width: 160px; }
+.newpost input.grow { min-width: 160px; flex: 1 1 160px; }
+.newpost > select { max-width: 100%; }
 
 /* Infoboks: forklaringer og eksempler, sammenklappet som standard */
 .infobox { margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
