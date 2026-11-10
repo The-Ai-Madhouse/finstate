@@ -65,9 +65,21 @@ function allItems(data: AppData, ledger: Ledger, accountId: string): SettleItem[
   return [...byKey.values()].filter((i) => i.amount !== 0).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-/** Skal posten afstemmes? Brugerens valg – ellers ja, hvis den allerede har grupper. */
-export const isSettled = (d: Pick<AppData, 'matches'>, a: Pick<Account, 'id' | 'settle' | 'kind'>) =>
-  a.kind === 'tracked' && (a.settle ?? (d.matches ?? []).some((m) => m.accountId === a.id));
+/** Afstemmes posten i perioden? Det vælges pr. periode (financial statement). */
+export const isSettled = (period: Pick<Period, 'settle'> | undefined, a: Pick<Account, 'id' | 'kind'>) =>
+  a.kind === 'tracked' && !!period?.settle?.includes(a.id);
+
+/** Tilføj posten til (eller fjern den fra) afstemningen i én periode. Dens parringer bevares. */
+export function withSettle(d: AppData, periodId: string, accountId: string, on: boolean): AppData {
+  return {
+    ...d,
+    periods: d.periods.map((p) => {
+      if (p.id !== periodId) return p;
+      const rest = (p.settle ?? []).filter((id) => id !== accountId);
+      return { ...p, settle: on ? [...rest, accountId] : rest };
+    }),
+  };
+}
 
 export function settleState(data: AppData, ledger: Ledger, accountId: string, period?: Pick<Period, 'start' | 'end'>) {
   const items = settleItems(data, ledger, accountId, period);

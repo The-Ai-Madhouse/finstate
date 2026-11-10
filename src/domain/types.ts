@@ -48,7 +48,7 @@ export interface Account {
   defaultCategoryId?: string;
   /** Brugerens kommentar pr. periode (periodId → tekst). Kopieres til en ny periode fra den forrige. */
   notes?: Record<string, string>;
-  /** Med i "Udlæg & tilgodehavender" (afstemning). Uden valg: med, hvis posten allerede har afstemte grupper. */
+  /** Ældre: med i afstemningen i alle perioder – migreres til Period.settle (afstemning vælges nu pr. periode). */
   settle?: boolean;
   /** Ældre kommentar uden periode – migreres til notes. */
   note?: string;
@@ -186,6 +186,8 @@ export interface Period {
   coverageOk?: string[];
   /** Hvad Regnskab viser af året: hele året (standard) eller kun et halvår. */
   show?: 'year' | 'h1' | 'h2';
+  /** Poster, der afstemmes i netop denne periode (fx "Jonas skylder mig") – vælges pr. periode. */
+  settle?: string[];
 }
 
 /** Brugerens egne posttyper (fx "Opsparing", "Lån"). "Ingen type" er altid en mulighed. */

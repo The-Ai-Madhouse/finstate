@@ -101,7 +101,7 @@ const LEGACY_TYPE_LABEL: Record<string, string | undefined> = {
  *    transaktionerne, og reglerne slås fra (de slettes ikke og kan slås til igen i Indstillinger).
  */
 export function migrateModel(input: AppData): AppData {
-  let d = migratePeriods(input);
+  let d = migrateSettle(migratePeriods(input));
   if (!d.accountTypes || d.accounts.some((a) => a.subtype !== undefined)) {
     const types: { id: string; name: string }[] = [...(d.accountTypes ?? [])];
     const idOf = (name: string) => {
@@ -244,4 +244,31 @@ function halfSlideNotes(rec: AppData['slideNotes'], halves: Period[], moved: Map
     out[key] = { ...rec[h.id], ...out[key] };
   }
   return out;
+}
+
+/**
+ * Afstemning vælges nu pr. periode. Ældre data havde valget på posten (alle perioder):
+ *  - settle = true → med i alle perioder
+ *  - intet valg, men parringer → med i de perioder, hvor posten har parrede bevægelser
+ * Idempotent: kører kun, mens en post har det gamle felt (eller parringer findes og ingen periode har valgt noget).
+ */
+export function migrateSettle(d: AppData): AppData {
+  const legacy = d.accounts.some((a) => a.settle !== undefined);
+  const inferred = !legacy && (d.matches ?? []).length > 0 && d.periods.every((p) => p.settle === undefined);
+  if (!legacy && !inferred) return d;
+  const txDate = new Map(d.txs.map((t) => [t.id, t.date]));
+  const oiDate = new Map(d.openItems.map((o) => [o.id, o.date]));
+  const keyDate = (k: string) => (k.startsWith('tx:') ? txDate.get(k.slice(3)) : k.startsWith('oi:') ? oiDate.get(k.slice(3)) : k.startsWith('primo:') ? k.slice(6) : undefined);
+  const periods = d.periods.map((p) => {
+    const ids = new Set(p.settle ?? []);
+    for (const a of d.accounts) {
+      if (a.kind !== 'tracked' || a.settle === false) continue;
+      if (a.settle === true) { ids.add(a.id); continue; }
+      const used = (d.matches ?? []).some((m) => m.accountId === a.id && m.keys.some((k) => { const dt = keyDate(k); return !!dt && dt >= p.start && dt <= p.end; }));
+      if (used) ids.add(a.id);
+    }
+    return { ...p, settle: [...ids] };
+  });
+  const accounts = d.accounts.map((a) => { if (a.settle === undefined) return a; const { settle: _s, ...rest } = a; void _s; return rest; });
+  return { ...d, periods, accounts };
 }

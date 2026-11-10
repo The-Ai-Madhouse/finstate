@@ -502,7 +502,7 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
   // Poster, der ikke er importerede bankkonti (fx en person eller et lån): vis bevægelserne – de hører sammen via posten.
   const imported = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
   // Afstemte poster viser bevægelserne i afstemningen nedenfor.
-  const moves = imported || (acc.kind === 'tracked' && isSettled(e.data, acc)) ? [] : postMovements(e.data, e.resolved, acc.id, period);
+  const moves = imported || (acc.kind === 'tracked' && isSettled(period, acc)) ? [] : postMovements(e.data, e.resolved, acc.id, period);
   if (!total && !moves.length) return null;
   const KINDS: TransferKind[] = ['pair', 'direct', 'transit', 'missing'];
   const sign = acc.side === 'asset' ? 1 : -1;

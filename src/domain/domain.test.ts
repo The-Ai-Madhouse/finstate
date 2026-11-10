@@ -862,3 +862,25 @@ describe('afstemning af transaktioner, der hører sammen', () => {
     expect(buildEngine(d).statement(d.periods[0]).result).toBe(buildEngine(d0).statement(d0.periods[0]).result);
   });
 });
+
+describe('afstemning pr. periode', () => {
+  it('is chosen per financial statement, and old per-post choices are migrated to the periods where they were used', async () => {
+    const { isSettled, withSettle } = await import('./settle');
+    const { migrateSettle } = await import('./migrate');
+    const d0 = demoData();
+    const jonas = d0.accounts.find((a) => a.id === 'acc-jonas')!;
+    const d = withSettle(d0, 'p-2025', 'acc-jonas', true);
+    const [y25, y26] = d.periods;
+    expect([isSettled(y25, jonas), isSettled(y26, jonas)]).toEqual([true, false]);
+    expect(isSettled(withSettle(d, 'p-2025', 'acc-jonas', false).periods[0], jonas)).toBe(false);
+    // Ældre data: valget lå på posten (alle perioder)
+    const legacyAll = migrateSettle({ ...d0, accounts: d0.accounts.map((a) => (a.id === 'acc-jonas' ? { ...a, settle: true } : a)) });
+    expect(legacyAll.periods.map((p) => p.settle)).toEqual([['acc-jonas'], ['acc-jonas']]);
+    expect(legacyAll.accounts.find((a) => a.id === 'acc-jonas')!.settle).toBeUndefined();
+    expect(migrateSettle(legacyAll)).toBe(legacyAll);
+    // Intet valg, men parringer i 2025 → kun med i 2025
+    const repay = d0.txs.find((t) => t.text === 'MobilePay Jonas Lind' && t.date === '2025-08-20')!;
+    const inferred = migrateSettle({ ...d0, matches: [{ id: 'm', accountId: 'acc-jonas', keys: ['primo:2025-01-01', `tx:${repay.id}`] }] });
+    expect(inferred.periods.map((p) => p.settle)).toEqual([['acc-jonas'], []]);
+  });
+});

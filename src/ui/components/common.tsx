@@ -777,7 +777,7 @@ function TxRelations({ tx }: { tx: Tx }) {
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
   // Poster, der følger overførsler (fx en person): er bevægelsen parret med det, den hører sammen med – og går det op?
   // Kun poster, du har valgt at afstemme.
-  const st = target.kind === 'tracked' && isSettled(e.data, target) ? settleState(e.data, e.ledger, target.id, period) : undefined;
+  const st = target.kind === 'tracked' && isSettled(period, target) ? settleState(e.data, e.ledger, target.id, period) : undefined;
   const group = st?.groups.find((g) => g.items.some((i) => i.key === `tx:${tx.id}`));
   const mates = group?.items.filter((i) => i.key !== `tx:${tx.id}`) ?? [];
   const pairing = st && (

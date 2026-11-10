@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
-import { isSettled, pairItems, settleState, unpair, writeOffDifference, type SettleItem } from '../../domain/settle';
+import { isSettled, pairItems, settleState, unpair, withSettle, writeOffDifference, type SettleItem } from '../../domain/settle';
 import { acceptLinkDifference, linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
@@ -129,9 +129,9 @@ function WriteOff({ onPick, sum }: { onPick: (categoryId: string) => void; sum: 
   );
 }
 
-/** Gør en post klar til afstemning (eller fjern den igen). */
-export const setPostSettle = (id: string, settle: boolean) =>
-  useStore.getState().update((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, settle } : a)) }));
+/** Tilføj en post til afstemningen i en periode (eller fjern den igen) – valget gælder kun den periode. */
+export const setPostSettle = (periodId: string, id: string, on: boolean) =>
+  useStore.getState().update((d) => withSettle(d, periodId, id, on));
 
 /**
  * Afstemning: det, du har valgt at afstemme i perioden –
@@ -146,8 +146,9 @@ export function SettleOverview() {
   const [adding, setAdding] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const tracked = e.data.accounts.filter((a) => a.kind === 'tracked');
-  const posts = tracked.filter((a) => isSettled(e.data, a));
-  const candidates = tracked.filter((a) => !isSettled(e.data, a) && !a.archived);
+  // Valget gælder kun denne periode – en post kan afstemmes i ét år og ikke i et andet.
+  const posts = tracked.filter((a) => isSettled(period, a));
+  const candidates = tracked.filter((a) => !isSettled(period, a) && !a.archived);
   const groups = linkGroups(e.data, period);
   // Kommer man fra en post eller "hører sammen": fold posten ud / rul hertil.
   useEffect(() => {
@@ -163,7 +164,7 @@ export function SettleOverview() {
         {candidates.length > 0 && (adding ? (
           <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
             <SearchCombo className="sm" options={candidates.map((a) => ({ id: a.id, label: a.name }))} value={undefined}
-              onChange={(id) => { if (id) { setPostSettle(id, true); setOpenId(id); setAdding(false); } }}
+              onChange={(id) => { if (id && period) { setPostSettle(period.id, id, true); setOpenId(id); setAdding(false); } }}
               placeholder="Vælg post…" searchPlaceholder="Søg post…" ariaLabel="Tilføj post til afstemning" emptyText="Ingen post matcher" />
             <button className="btn sm ghost" onClick={() => setAdding(false)} aria-label="Annullér">✕</button>
           </span>
@@ -177,7 +178,7 @@ export function SettleOverview() {
 
       <div className="section-label">Poster</div>
       {!posts.length ? (
-        <div className="small muted">Ingen poster valgt. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig".</div>
+        <div className="small muted">Ingen poster valgt i {period?.name ?? 'perioden'}. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig" – valget gælder kun dette financial statement.</div>
       ) : (
         <table>
           <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Uparrede</th><th>Går ikke op</th><th /></tr></thead>
@@ -195,7 +196,7 @@ export function SettleOverview() {
                   <td className="num" style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn sm ghost" onClick={() => setOpenId(openId === a.id ? undefined : a.id)}>{openId === a.id ? 'Luk' : 'Afstem'}</button>
                     <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id)}>Post →</button>
-                    <button className="btn sm ghost" title="Fjern fra afstemningen (dine grupper bevares)" aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { setPostSettle(a.id, false); if (openId === a.id) setOpenId(undefined); }}>✕</button>
+                    <button className="btn sm ghost" title={`Fjern fra afstemningen i ${period?.name ?? 'perioden'} (dine parringer bevares)`} aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { if (period) setPostSettle(period.id, a.id, false); if (openId === a.id) setOpenId(undefined); }}>✕</button>
                   </td>
                 </tr>,
                 openId === a.id && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={5}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
@@ -253,13 +254,14 @@ function LinkGroupCard({ g }: { g: LinkGroup }) {
 
 /** I postens detaljer: afstemningen, hvis posten er valgt – ellers en knap til at vælge den. */
 export function SettleToggle({ acc }: { acc: Account }) {
-  const data = useStore((s) => s.data);
-  const on = isSettled(data, acc);
-  if (!on) return <div><button className="btn sm ghost" onClick={() => setPostSettle(acc.id, true)}>+ Afstem posten (par udlæg og tilbagebetalinger)</button></div>;
+  const period = usePeriod();
+  const on = isSettled(period, acc);
+  if (!period) return null;
+  if (!on) return <div><button className="btn sm ghost" onClick={() => setPostSettle(period.id, acc.id, true)}>+ Afstem posten i {period.name} (par udlæg og tilbagebetalinger)</button></div>;
   return (
     <div className="col" style={{ gap: 4 }}>
       <SettlePanel acc={acc} />
-      <div><button className="btn sm ghost" onClick={() => setPostSettle(acc.id, false)}>Stop afstemning af posten</button></div>
+      <div><button className="btn sm ghost" onClick={() => setPostSettle(period.id, acc.id, false)}>Stop afstemning af posten i {period.name}</button></div>
     </div>
   );
 }

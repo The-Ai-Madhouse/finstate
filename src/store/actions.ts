@@ -164,6 +164,7 @@ export function deleteAccount(accountId: string) {
       valuations: d.valuations.filter((v) => v.accountId !== accountId),
       openItems: d.openItems.filter((o) => o.accountId !== accountId),
       matches: (d.matches ?? []).filter((m) => m.accountId !== accountId),
+      periods: d.periods.map((p) => (p.settle?.includes(accountId) ? { ...p, settle: p.settle.filter((id) => id !== accountId) } : p)),
       txs: d.txs.map((t) => (usesTarget(t.manual) || t.splits?.some(usesTarget) ? { ...t, manual: undefined, splits: undefined } : t)),
       rules: d.rules.filter((r) => !usesTarget(r.then) && !r.splits?.some((s) => usesTarget(s.cls))),
     };

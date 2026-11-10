@@ -197,9 +197,9 @@ function Internal() {
                   <span className="row xfer-actions">
                     {i.kind === 'pair' && <button className="btn sm ghost" title="De to hører ikke sammen" onClick={() => unpairTxs(i.out.id, i.inn.id)}>Ophæv</button>}
                     {i.kind === 'transit' && <button className="btn sm ghost" title="De to hører ikke sammen" onClick={() => unpairTxs(i.t.id, i.partner.id)}>Ophæv</button>}
-                    {i.kind === 'direct' && i.target?.kind === 'tracked' && (isSettled(data, i.target)
+                    {i.kind === 'direct' && i.target?.kind === 'tracked' && (isSettled(period, i.target)
                       ? <button className="btn sm ghost" title="Par posten bevægelser under Afstemning" onClick={() => useStore.getState().showTransfers({ settle: true, postId: i.target!.id })}>Afstemning →</button>
-                      : <button className="btn sm ghost" title="Tilføj posten til Afstemning, så du kan parre udlæg og tilbagebetalinger" onClick={() => { setPostSettle(i.target!.id, true); useStore.getState().showTransfers({ settle: true, postId: i.target!.id }); }}>Afstem posten</button>)}
+                      : <button className="btn sm ghost" title="Tilføj posten til Afstemning, så du kan parre udlæg og tilbagebetalinger" onClick={() => { setPostSettle(period.id, i.target!.id, true); useStore.getState().showTransfers({ settle: true, postId: i.target!.id }); }}>Afstem posten</button>)}
                     <button className={`btn sm ${editing === i.key ? '' : 'ghost'}`} onClick={() => setEditing(editing === i.key ? undefined : i.key)}>{editing === i.key ? 'Luk' : 'Ret'}</button>
                   </span>
                 </div>
