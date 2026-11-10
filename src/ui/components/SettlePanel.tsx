@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
-import { isSettled, pairItems, settleState, unpair, writeOffDifference, type SettleItem } from '../../domain/settle';
+import { pairItems, settleState, unpair, writeOffDifference, type SettleItem } from '../../domain/settle';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { CategoryCombo, Money, SearchCombo, InfoBox } from './common';
+import { CategoryCombo, Money, InfoBox } from './common';
 
 /**
  * Afstemning af en post, der følger overførsler (udlæg, tilgodehavender, gæld til personer):
@@ -125,79 +125,5 @@ function WriteOff({ onPick, sum }: { onPick: (categoryId: string) => void; sum: 
       <CategoryCombo className="sm" primaryKind={sum > 0 ? 'expense' : 'income'} onChange={(id) => { if (id) { onPick(id); setOpen(false); } }} placeholder="vælg kategori" />
       <button className="btn sm ghost" onClick={() => setOpen(false)} aria-label="Annullér">✕</button>
     </span>
-  );
-}
-
-/** Oversigt over de poster, du har valgt at afstemme – med antal uparrede og grupper, der ikke går op. */
-export function SettleOverview() {
-  const e = useEngine();
-  const period = usePeriod();
-  const update = useStore((s) => s.update);
-  const [openId, setOpenId] = useState<string>();
-  const [adding, setAdding] = useState(false);
-  const tracked = e.data.accounts.filter((a) => a.kind === 'tracked');
-  const posts = tracked.filter((a) => isSettled(e.data, a));
-  const candidates = tracked.filter((a) => !isSettled(e.data, a) && !a.archived);
-  const setSettle = (id: string, settle: boolean) => update((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, settle } : a)) }));
-  if (!tracked.length) return null;
-  return (
-    <div className="card">
-      <div className="card-head">
-        <h2 className="grow">Udlæg & tilgodehavender</h2>
-        {candidates.length > 0 && (adding ? (
-          <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
-            <SearchCombo className="sm" options={candidates.map((a) => ({ id: a.id, label: a.name }))} value={undefined}
-              onChange={(id) => { if (id) { setSettle(id, true); setOpenId(id); setAdding(false); } }}
-              placeholder="Vælg post…" searchPlaceholder="Søg post…" ariaLabel="Tilføj post til afstemning" emptyText="Ingen post matcher" />
-            <button className="btn sm ghost" onClick={() => setAdding(false)} aria-label="Annullér">✕</button>
-          </span>
-        ) : <button className="btn sm" onClick={() => { setAdding(true); setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Tilføj post til afstemning"]')?.focus(), 0); }}>+ Tilføj post</button>)}
-      </div>
-      <InfoBox>
-        Vælg de poster, hvor det giver mening at parre det, der hører sammen – fx et udlæg og tilbagebetalingen – så du kan se, hvad der er afregnet, og om beløbene stemmer.
-      </InfoBox>
-      {!posts.length ? (
-        <div className="small muted">Ingen poster valgt endnu. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig".</div>
-      ) : (
-        <table>
-          <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Uparrede</th><th>Går ikke op</th><th /></tr></thead>
-          <tbody>
-            {posts.map((a) => {
-              const st = settleState(e.data, e.ledger, a.id, period);
-              const bad = st.groups.filter((g) => g.sum !== 0).length;
-              const bal = st.items.reduce((s, i) => s + i.amount, 0);
-              return [
-                <tr key={a.id} className={`click ${openId === a.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpenId(openId === a.id ? undefined : a.id); }}>
-                  <td><span className={`caret ${openId === a.id ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
-                  <td className="num"><Money v={bal} decimals /></td>
-                  <td>{st.open.length ? <span className="chip review">{st.open.length}</span> : <span className="chip user">0</span>}</td>
-                  <td>{bad ? <span className="chip review">{bad}</span> : <span className="muted small">–</span>}</td>
-                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn sm ghost" onClick={() => setOpenId(openId === a.id ? undefined : a.id)}>{openId === a.id ? 'Luk' : 'Afstem'}</button>
-                    <button className="btn sm ghost" title="Fjern fra afstemningen (dine grupper bevares)" aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { setSettle(a.id, false); if (openId === a.id) setOpenId(undefined); }}>✕</button>
-                  </td>
-                </tr>,
-                openId === a.id && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={5}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
-              ];
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
-/** I postens detaljer: afstemningen, hvis posten er valgt – ellers en knap til at slå den til. */
-export function SettleToggle({ acc }: { acc: Account }) {
-  const data = useStore((s) => s.data);
-  const update = useStore((s) => s.update);
-  const on = isSettled(data, acc);
-  const set = (settle: boolean) => update((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === acc.id ? { ...a, settle } : a)) }));
-  if (!on) return <div><button className="btn sm ghost" onClick={() => set(true)}>+ Afstem udlæg og tilbagebetalinger på denne post</button></div>;
-  return (
-    <div className="col" style={{ gap: 4 }}>
-      <SettlePanel acc={acc} />
-      <div><button className="btn sm ghost" onClick={() => set(false)}>Stop afstemning af posten</button></div>
-    </div>
   );
 }

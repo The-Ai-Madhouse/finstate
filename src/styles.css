@@ -685,3 +685,5 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .tx-rel-list { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); }
 .xfer-txlink { display: block; max-width: 100%; text-align: left; color: var(--ink-2); }
 .xfer-txlink:hover { color: var(--accent); }
+.tx-rel-pair { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.direct-posts td { vertical-align: middle; }

@@ -10,6 +10,7 @@ import { setMemo, useEngine, usePeriod } from '../../store/actions';
 import { balancesAt, isTransitRef, transitName } from '../../domain/ledger';
 import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
 import { postMovements, transferInfo } from '../../domain/transfers';
+import { settleState } from '../../domain/settle';
 import { dateShort } from '../../domain/format';
 import { KIND_LABEL, NO_TYPE, addAccountType, noteFor, suggestCategory, withAccountInPeriods } from '../../domain/accountTypes';
 import { addDays, uid } from '../../domain/util';
@@ -769,6 +770,24 @@ function TxRelations({ tx }: { tx: Tx }) {
   const target = info.target;
   const others = postMovements(e.data, e.resolved, target.id, period).filter((t) => t.id !== tx.id);
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
+  // Poster, der følger overførsler (fx en person): er bevægelsen parret med det, den hører sammen med – og går det op?
+  const st = target.kind === 'tracked' ? settleState(e.data, e.ledger, target.id, period) : undefined;
+  const group = st?.groups.find((g) => g.items.some((i) => i.key === `tx:${tx.id}`));
+  const mates = group?.items.filter((i) => i.key !== `tx:${tx.id}`) ?? [];
+  const pairing = st && (
+    <div className="tx-rel-pair">
+      {group ? (
+        <>
+          <span className={`chip ${group.sum === 0 ? 'user' : 'review'}`}>{group.sum === 0 ? '✓ Parret – går op' : `Parret – ${group.sum > 0 ? `mangler ${kr(group.sum)}` : `${kr(-group.sum)} for meget`}`}</span>
+          <span className="small muted">med</span>
+          {mates.map((m) => (m.txId
+            ? <button key={m.key} className="linkish" onClick={() => showTx(m.txId!)}>{dateShort(m.date)} "{m.text}" {kr2f(m.amount)}</button>
+            : <span key={m.key} className="small">{m.primo ? 'saldo primo' : m.text} {kr2f(m.amount)}</span>))}
+        </>
+      ) : <span className="chip review" title="Par den med det, den hører sammen med – fx udlægget og tilbagebetalingen">Ikke parret</span>}
+      <button className="tx-link-x" title="Par bevægelserne på posten – og afskriv en evt. difference" onClick={() => showTransfers({ postId: target.id })}>{group ? 'Ret parring →' : 'Par i Overførsler →'}</button>
+    </div>
+  );
   return (
     <div className="tx-rel" onKeyDown={(ev) => ev.stopPropagation()}>
       <span className="tx-rel-label" title="Direkte overførsel til en post – alle bevægelser på posten hører sammen">◆ Via posten</span>
@@ -782,6 +801,7 @@ function TxRelations({ tx }: { tx: Tx }) {
           <span className="small muted">i alt med denne: {kr2f(sum)}</span>
         </div>
       )}
+      {pairing}
     </div>
   );
 }

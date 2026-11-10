@@ -11,7 +11,9 @@ import { addDays, dayDiff } from '../../domain/util';
 import { pairTxs, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { AccountSelect, ClassEditor, Empty, InfoBox, Money, SearchCombo, isComplete } from '../components/common';
-import { SettleOverview } from '../components/SettlePanel';
+import { SettlePanel } from '../components/SettlePanel';
+import { settleState } from '../../domain/settle';
+import { balancesAt } from '../../domain/ledger';
 
 export function TransfersView() {
   const period = usePeriod();
@@ -20,7 +22,6 @@ export function TransfersView() {
     <div className="stack">
       <h1>Overførsler</h1>
       <Internal />
-      <SettleOverview />
     </div>
   );
 }
@@ -74,15 +75,17 @@ function Internal() {
   const [editing, setEditing] = useState<string>();
   // Kommer man fra Aktiver & passiver: vis én overførsel eller alle for en post.
   const [onlyTx, setOnlyTx] = useState<string>();
+  const [openPost, setOpenPost] = useState<string>();
   const focus = useStore((st) => st.transferFocus);
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!focus) return;
     setFolded(false);
-    setStatus('all');
+    setStatus(focus.postId ? 'direct' : 'all');
     setQ('');
-    setAccountId(focus.txId ? undefined : focus.accountId);
+    setAccountId(focus.txId || focus.postId ? undefined : focus.accountId);
     setOnlyTx(focus.txId);
+    setOpenPost(focus.postId);
     useStore.getState().clearTransferFocus();
     setTimeout(() => cardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
   }, [focus]);
@@ -166,7 +169,9 @@ function Internal() {
         </div>
       )}
 
-      {!shown.length ? (
+      {status === 'direct' && shown.length > 0 ? (
+        <DirectPosts items={shown} period={period} openPost={openPost} setOpenPost={setOpenPost} />
+      ) : !shown.length ? (
         <Empty>{!items.length ? 'Ingen interne overførsler i perioden.' : status === 'missing' && !q && !accountId ? 'Alle interne overførsler har en modpost. 🎉' : 'Ingen overførsler matcher.'}</Empty>
       ) : (
         <div className="xfer-list">
@@ -316,5 +321,52 @@ function CarriedSection({ carried, period }: { carried: CarriedTransit[]; period
       })}
       <div className="section-label" style={{ marginTop: 14 }}>Periodens interne overførsler</div>
     </div>
+  );
+}
+
+/**
+ * "Direkte til post" samlet pr. post: par de bevægelser, der hører sammen (fx et udlæg og tilbagebetalingen),
+ * se om de går op – og afskriv en difference. Kun periodens bevægelser (+ saldo primo).
+ */
+function DirectPosts({ items, period, openPost, setOpenPost }: { items: Item[]; period: Period; openPost?: string; setOpenPost: (id?: string) => void }) {
+  const e = useEngine();
+  const byPost = new Map<string, number>();
+  for (const i of items) if (i.kind === 'direct' && !i.transit && i.target) byPost.set(i.target.id, (byPost.get(i.target.id) ?? 0) + 1);
+  const posts = [...byPost.keys()].map((id) => e.data.accounts.find((a) => a.id === id)).filter((a): a is Account => !!a);
+  const ultimo = balancesAt(e.ledger, period.end);
+  const nonPost = items.filter((i) => i.kind === 'direct' && i.transit).length;
+  return (
+    <>
+      <table className="direct-posts">
+        <thead><tr><th>Post</th><th className="num">Bevægelser</th><th>Parret</th><th className="num">Saldo ultimo</th><th /></tr></thead>
+        <tbody>
+          {posts.map((a) => {
+            const pairable = a.kind === 'tracked';
+            const st = pairable ? settleState(e.data, e.ledger, a.id, period) : undefined;
+            const bad = st ? st.groups.filter((g) => g.sum !== 0).length : 0;
+            const isOpen = openPost === a.id;
+            const close = (ultimo.get(`acc:${a.id}`) ?? 0) * (a.side === 'asset' ? 1 : -1);
+            return [
+              <tr key={a.id} className={`${pairable ? 'click' : ''} ${isOpen ? 'expanded' : ''}`} onClick={(ev) => { if (pairable && !(ev.target as HTMLElement).closest('button')) setOpenPost(isOpen ? undefined : a.id); }}>
+                <td>{pairable ? <span className={`caret ${isOpen ? 'open' : ''}`} aria-hidden>›</span> : <span className="caret" />} <b>{a.name}</b></td>
+                <td className="num">{byPost.get(a.id)}</td>
+                <td>
+                  {!pairable ? <span className="small muted" title="Værdien taster du selv – overførslerne er indskud/afdrag og skal ikke parres">tastes selv – intet at parre</span>
+                    : st!.open.length ? <span className="chip review">{st!.open.length} uparrede</span> : <span className="chip user">✓ alt parret</span>}
+                  {bad > 0 && <span className="chip review" style={{ marginLeft: 4 }}>{bad} går ikke op</span>}
+                </td>
+                <td className="num"><Money precise v={close} /></td>
+                <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                  {pairable && <button className={`btn sm ${isOpen ? '' : 'ghost'}`} onClick={() => setOpenPost(isOpen ? undefined : a.id)}>{isOpen ? 'Luk' : 'Par bevægelser'}</button>}
+                  <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id)}>Post →</button>
+                </td>
+              </tr>,
+              isOpen && pairable && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={5}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
+            ];
+          })}
+        </tbody>
+      </table>
+      {nonPost > 0 && <p className="small muted" style={{ marginTop: 8 }}>{nonPost} bogført mod penge undervejs fra forrige periode – se øverst.</p>}
+    </>
   );
 }
