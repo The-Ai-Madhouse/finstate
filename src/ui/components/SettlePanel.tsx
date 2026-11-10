@@ -160,7 +160,7 @@ export const setPostSettle = (periodId: string, id: string, on: boolean) =>
 /**
  * Afstemning: det, du har valgt at afstemme i perioden –
  *  · poster, der følger dine overførsler (fx "Jonas skylder mig"): par bevægelserne og afskriv en difference
- *  · transaktioner, du har markeret som "hører sammen" i Kategorisér (fx et køb og en refusion)
+ *  · transaktioner, du har parret som udgift/indtægt i Kategorisér (fx et udlæg og indbetalingen)
  */
 export function SettleOverview() {
   const e = useEngine();
@@ -174,7 +174,7 @@ export function SettleOverview() {
   const posts = tracked.filter((a) => isSettled(period, a));
   const candidates = tracked.filter((a) => !isSettled(period, a) && !a.archived);
   const groups = linkGroups(e.data, period);
-  // Kommer man fra en post eller "hører sammen": fold posten ud / rul hertil.
+  // Kommer man fra en post eller en parring: fold posten ud / rul hertil.
   useEffect(() => {
     if (!focus?.settle) return;
     if (focus.postId) setOpenId(focus.postId);

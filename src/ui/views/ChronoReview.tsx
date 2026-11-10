@@ -264,7 +264,7 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
   };
 
   const acc = e.data.accounts.find((a) => a.id === tx.accountId);
-  // "Hører sammen med": mens man vælger, kan rækken klikkes for at blive knyttet til den valgte.
+  // "⇄ Par…": mens man vælger den anden, kan rækken klikkes.
   const lt = linkTargetProps(useStore((st) => st.linkPick), tx.id);
   const period = usePeriod();
   // Knappen tæller kun lignende i det aktuelle financial statement (andre perioder kan vises i vinduet).

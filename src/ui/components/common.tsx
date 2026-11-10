@@ -700,8 +700,8 @@ function completePick(pick: LinkPick, otherId: string) {
 }
 
 /**
- * Under transaktionens tekst: "hører sammen med"-gruppen – og knappen til at vælge en anden transaktion.
- * Overførsler får "Par" i stedet (på en post, der afstemmes, eller med modposten); almindelige indtægter/udgifter "Hører sammen med".
+ * Under transaktionens tekst: det, den er parret med – og "⇄ Par…" til at vælge en anden transaktion.
+ * Knappen er synlig på overførsler, der mangler at blive parret (på en post eller med modposten); på almindelige transaktioner ved hover.
  */
 function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   const e = useEngine();
@@ -718,6 +718,8 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   // Resten hører hjemme i den kategori, de parrede står i (samme for alle i gruppen).
   const cats = new Set([tx, ...others].map((t) => e.resolved.get(t.id)?.lines.find((l) => l.categoryId)?.categoryId ?? ''));
   const restCat = cats.size === 1 ? [...cats][0] || undefined : undefined;
+  // Parret som intern (fx på et lån) – så er der ingen "rest" at placere.
+  const allInternal = [tx, ...others].every((t) => e.resolved.get(t.id)?.lines.every((l) => l.type === 'internal'));
   const showTransfers = useStore((s) => s.showTransfers);
   const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '';
   const mode = pickModeFor(e, tx, period);
@@ -753,7 +755,7 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
           <span className="small muted">i alt <span className={sum === 0 ? 'pos' : ''}>{kr2f(sum)}{sum === 0 ? ' ✓' : ''}</span></span>
           {sum !== 0 && (restCat
             ? <span className="small">resten → <b>{categoryLabel(e.data.categories, restCat)}</b></span>
-            : <button className="tx-link-x" title="Vælg, hvor resten hører hjemme – under Afstemning" onClick={() => showTransfers({ settle: true })}>Placér resten →</button>)}
+            : !allInternal && <button className="tx-link-x" title="Vælg, hvor resten hører hjemme – under Afstemning" onClick={() => showTransfers({ settle: true })}>Placér resten →</button>)}
           <button className="tx-link-x" title="Ophæv parringen for denne transaktion (kategorien bevares)" aria-label="Ophæv parring" onClick={() => update((d) => unlinkTx(d, tx.id))}>Ophæv</button>
         </div>
       )}
@@ -911,7 +913,7 @@ export function ResultParts({ parts, categories }: { parts: Map<string, number>;
 }
 
 /**
- * Mens man vælger "hører sammen med": rækkerne i listen kan klikkes for at knytte dem til den valgte transaktion.
+ * Mens man vælger, hvad en transaktion skal parres med: rækkerne i listen kan klikkes for at vælge den anden.
  * Bruges på både gennemgangens rækker og den grupperede tabel.
  */
 export function linkTargetProps(pick: LinkPick | undefined, txId: string) {
