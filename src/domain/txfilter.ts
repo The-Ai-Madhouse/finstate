@@ -1,4 +1,5 @@
 /** Filtrering og sortering af transaktioner i Kategorisér. */
+import { descendants } from './categories';
 import { NEEDS_REVIEW, type Resolved } from './classify';
 import { kr2f, parseAmount } from './format';
 import type { Category, Tx } from './types';
@@ -41,7 +42,7 @@ export function textMatches(t: Tx, q: string): boolean {
 }
 
 export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories: Category[], f: TxFilter): Tx[] {
-  const parentOf = new Map(categories.map((c) => [c.id, c.parentId]));
+  const inCategory = new Set(f.categoryId ? descendants(categories, f.categoryId) : []);
   const min = f.min?.trim() ? parseAmount(f.min) : null;
   const max = f.max?.trim() ? parseAmount(f.max) : null;
   const out = txs.filter((t) => {
@@ -56,7 +57,7 @@ export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories
     if (f.status === 'pending' && !NEEDS_REVIEW.has(r.source)) return false;
     if (f.status === 'done' && NEEDS_REVIEW.has(r.source)) return false;
     if (f.type !== 'all' && !r.lines.some((l) => (f.type === 'internal' ? l.type === 'internal' || l.type === 'outlay' : l.type === f.type))) return false;
-    if (f.categoryId && !r.lines.some((l) => l.categoryId === f.categoryId || (l.categoryId && parentOf.get(l.categoryId) === f.categoryId))) return false;
+    if (f.categoryId && !r.lines.some((l) => l.categoryId && inCategory.has(l.categoryId))) return false;
     return textMatches(t, f.q);
   });
   return sortTxs(out, f.sort);

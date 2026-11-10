@@ -12,6 +12,7 @@
  * Invariant pr. hændelse: sum(balanceposteringer) = sum(egenkapitalposteringer).
  * Derfor gælder altid: Δ egenkapital = periodens resultat (+ evt. åbningsposter).
  */
+import { childrenOf, descendants } from './categories';
 import type { Resolved } from './classify';
 import { orderChain, bankBalanceAt, type ChainBreak } from './reconcile';
 import type { Account, AppData, Category, Period, Tx } from './types';
@@ -172,7 +173,12 @@ export interface CatTotal {
   name: string;
   /** Præsentationsbeløb: indtægter positive, udgifter positive (refusion trækker fra). */
   amount: number;
-  children: { id: string; name: string; amount: number }[];
+  /** Underkategorier (i vilkårlig dybde). Har kategorien også egne posteringer, står de som "(uden underkategori)". */
+  children: CatTotal[];
+  /** Kategorierne, hvis posteringer indgår i beløbet (hele undertræet – eller kun kategorien selv for "(uden underkategori)"). */
+  cats: string[];
+  /** "(uden underkategori)": beløb bogført direkte på en kategori, der også har underkategorier. id er "<kategori>#own". */
+  own?: boolean;
 }
 
 export interface Statement {
@@ -276,29 +282,27 @@ export function statement(data: AppData, ledger: Ledger, period: Period): Statem
  * positivt → indtægt, negativt → udgift.
  */
 function categoryTotals(categories: Category[], plSum: Map<string, number>) {
-  const tops = categories.filter((c) => !c.parentId);
-  const net = (t: Category) =>
-    categories.filter((c) => c.id === t.id || c.parentId === t.id).reduce((s, c) => s + (plSum.get(`cat:${c.id}`) ?? 0), 0);
+  const tops = categories.filter((c) => !c.parentId || !categories.some((p) => p.id === c.parentId));
+  const net = (t: Category) => descendants(categories, t.id).reduce((s, id) => s + (plSum.get(`cat:${id}`) ?? 0), 0);
   const kindOf = (t: Category): 'income' | 'expense' => (t.kind === 'both' ? (net(t) < 0 ? 'expense' : 'income') : t.kind);
+  const node = (t: Category, sign: number, seen: Set<string>): CatTotal => {
+    seen.add(t.id);
+    const own = (plSum.get(`cat:${t.id}`) ?? 0) * sign;
+    const children = childrenOf(categories, t.id).filter((c) => !seen.has(c.id)).map((c) => node(c, sign, seen));
+    if (own && children.length) children.push({ id: `${t.id}#own`, name: '(uden underkategori)', amount: own, children: [], cats: [t.id], own: true });
+    return { id: t.id, name: t.name, amount: own + children.reduce((s, c) => s + (c.own ? 0 : c.amount), 0), children, cats: descendants(categories, t.id) };
+  };
   const build = (kind: 'income' | 'expense'): CatTotal[] =>
     tops
       .filter((t) => kindOf(t) === kind && (t.kind !== 'both' || net(t) !== 0))
-      .map((t) => {
-        const sign = kind === 'income' ? 1 : -1;
-        const own = (plSum.get(`cat:${t.id}`) ?? 0) * sign;
-        const children = categories
-          .filter((c) => c.parentId === t.id)
-          .map((c) => ({ id: c.id, name: c.name, amount: (plSum.get(`cat:${c.id}`) ?? 0) * sign }));
-        if (own && children.length) children.push({ id: t.id, name: '(uden underkategori)', amount: own });
-        return { id: t.id, name: t.name, amount: own + children.reduce((s, c) => s + (c.id === t.id ? 0 : c.amount), 0), children };
-      });
+      .map((t) => node(t, kind === 'income' ? 1 : -1, new Set()));
   // Kategorier der er slettet men stadig bruges, så intet forsvinder.
   const known = new Set(categories.map((c) => `cat:${c.id}`));
   const orphan = [...plSum.entries()].filter(([k]) => k.startsWith('cat:') && !known.has(k));
   const income = build('income');
   const expense = build('expense');
   for (const [k, v] of orphan) {
-    const row = { id: k.slice(4), name: `Slettet kategori (${k.slice(4)})`, amount: Math.abs(v), children: [] };
+    const row = { id: k.slice(4), name: `Slettet kategori (${k.slice(4)})`, amount: Math.abs(v), children: [], cats: [k.slice(4)] };
     (v >= 0 ? income : expense).push(row);
   }
   return { income, expense };

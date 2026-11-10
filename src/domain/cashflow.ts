@@ -1,5 +1,6 @@
 import type { CatTotal, Statement } from './ledger';
 import type { Category, Period } from './types';
+import { ancestors } from './categories';
 import { elapsedEnd } from './periods';
 import { dayDiff } from './util';
 
@@ -24,26 +25,18 @@ const PASSIVE_NAME = /rente|afkast|udbytte|investering|aktie|depot|leje|passiv/i
  * Udgift: faste udgifter der løber af sig selv (abonnementer, husleje …) – kun hvis du selv har markeret dem.
  */
 export function isPassive(categories: Category[], id: string): boolean {
-  const c = categories.find((x) => x.id === id);
-  if (!c) return false;
-  if (c.passive !== undefined) return c.passive;
-  const parent = c.parentId ? categories.find((x) => x.id === c.parentId) : undefined;
-  if (parent?.passive !== undefined) return parent.passive;
-  if (c.kind === 'expense') return false;
-  return PASSIVE_NAME.test(c.name) || (!!parent && PASSIVE_NAME.test(parent.name));
+  const path = ancestors(categories, id.replace(/#own$/, ''));
+  if (!path.length) return false;
+  // Dit eget valg på kategorien eller nærmeste overkategori afgør.
+  for (let i = path.length - 1; i >= 0; i--) if (path[i].passive !== undefined) return path[i].passive!;
+  if (path[path.length - 1].kind === 'expense') return false;
+  return path.some((c) => PASSIVE_NAME.test(c.name));
 }
 
-/** Passive beløb i perioden (indtægter eller udgifter) – på underkategoriniveau, så fx "Andet › Renter" tæller med. */
-export function passiveIncome(categories: Category[], income: CatTotal[]): number {
+/** Passive beløb (indtægter eller udgifter) – på det dybeste niveau, så fx "Andet › Renter" tæller med. */
+export function passiveIncome(categories: Category[], list: CatTotal[]): number {
   let sum = 0;
-  for (const top of income) {
-    // Uden underkategorier: hovedkategorien afgør. Med: hver underkategori (og evt. "(uden underkategori)" = hovedkategorien).
-    if (!top.children.length) {
-      if (isPassive(categories, top.id)) sum += top.amount;
-    } else {
-      for (const ch of top.children) if (isPassive(categories, ch.id)) sum += ch.amount;
-    }
-  }
+  for (const n of list) sum += n.children.length ? passiveIncome(categories, n.children) : isPassive(categories, n.own ? n.cats[0] : n.id) ? n.amount : 0;
   return sum;
 }
 

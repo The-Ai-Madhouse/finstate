@@ -1,3 +1,4 @@
+import { categoryPath, flattenTree } from '../../domain/categories';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NEEDS_REVIEW, SOURCE_LABEL, type Source } from '../../domain/classify';
 import type { Check } from '../../domain/engine';
@@ -70,8 +71,8 @@ function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, 
   const { categories } = useData();
   const update = useStore((s) => s.update);
   const [kind, setKind] = useState<Category['kind']>(fixedKind ?? categories.find((c) => c.id === defaultParent)?.kind ?? defaultKind ?? 'expense');
-  const tops = categories.filter((c) => !c.parentId && c.kind === kind);
-  const [parent, setParent] = useState<string>(defaultParent && tops.some((t) => t.id === defaultParent) ? defaultParent : '');
+  const tops = flattenTree(categories, categories.filter((c) => !c.parentId && c.kind === kind));
+  const [parent, setParent] = useState<string>(defaultParent && tops.some((t) => t.cat.id === defaultParent) ? defaultParent : '');
   const [name, setName] = useState(initialName);
   const dup = categories.some((c) => c.kind === kind && (c.parentId ?? '') === parent && c.name.trim().toLowerCase() === name.trim().toLowerCase());
   const create = () => {
@@ -102,7 +103,7 @@ function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, 
       )}
       <select className="sm" value={parent} onChange={(e) => setParent(e.target.value)} aria-label="Placering">
         <option value="">Ny hovedkategori</option>
-        {tops.map((t) => <option key={t.id} value={t.id}>Under {t.name}</option>)}
+        {tops.map(({ cat }) => <option key={cat.id} value={cat.id}>Under {categoryPath(categories, cat.id)}</option>)}
       </select>
       <button className="btn sm primary" disabled={!name.trim() || dup} onClick={create}>Opret</button>
       <button className="btn sm ghost" onClick={() => onDone()} aria-label="Annullér">✕</button>
@@ -112,7 +113,7 @@ function NewCategoryForm({ kind: fixedKind, defaultKind, defaultParent, onDone, 
 
 const fold = (s: string) => s.toLowerCase().replace(/å/g, 'aa').replace(/æ/g, 'ae').replace(/ø/g, 'oe').normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-export type ComboOption = { id: string; label: string; group?: string; sub?: boolean; hint?: string };
+export type ComboOption = { id: string; label: string; group?: string; sub?: boolean; depth?: number; hint?: string };
 
 /**
  * Søgbar dropdown – samme adfærd overalt: åbner ved fokus, skriv for at filtrere, ↑/↓ for at flytte,
@@ -219,6 +220,7 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
                 className={`combo-opt ${i === hi ? 'hi' : ''} ${o.id === value || (o.isClear && !value) ? 'cur' : ''} ${o.isNew ? 'new' : ''} ${o.isClear ? 'clear' : ''} ${o.sub ? 'sub' : ''}`}
                 onMouseDown={(e) => { e.preventDefault(); choose(o, false); }}
                 onMouseEnter={() => setHi(i)}
+                style={o.depth && o.depth > 1 ? { paddingLeft: 16 + (o.depth - 1) * 14 } : undefined}
               >
                 <span>{o.label}{o.hint && <span className="combo-hint"> {o.hint}</span>}</span>{(o.id === value || (o.isClear && !value)) && <span className="combo-check">✓</span>}
               </div>
@@ -255,9 +257,8 @@ export function CategoryCombo({ value, onChange, onCommit, onTypeKey, primaryKin
     const out: ComboOption[] = [];
     for (const k of kinds) {
       const group = k === 'both' ? 'Begge veje' : primaryKind && k !== primaryKind ? (k === 'expense' ? 'Refusion af udgift' : 'Tilbagebetaling af indtægt') : k === 'income' ? 'Indtægter' : 'Udgifter';
-      for (const t of categories.filter((c) => !c.parentId && c.kind === k)) {
-        out.push({ id: t.id, label: t.name, group });
-        for (const c of categories.filter((x) => x.parentId === t.id)) out.push({ id: c.id, label: `${t.name} › ${c.name}`, group, sub: true });
+      for (const { cat, depth } of flattenTree(categories, categories.filter((c) => !c.parentId && c.kind === k))) {
+        out.push({ id: cat.id, label: depth ? categoryPath(categories, cat.id) : cat.name, group, sub: depth > 0, depth });
       }
     }
     return out;
@@ -282,8 +283,7 @@ export function categoryLabel(categories: Category[], id?: string): string {
   if (!id) return '';
   const c = categories.find((x) => x.id === id);
   if (!c) return `(${id})`;
-  const p = c.parentId ? categories.find((x) => x.id === c.parentId) : undefined;
-  return p ? `${p.name} › ${c.name}` : c.name;
+  return categoryPath(categories, c.id);
 }
 
 export function AccountSelect({ value, onChange, exclude, filter, placeholder = '— vælg konto —', className }: {

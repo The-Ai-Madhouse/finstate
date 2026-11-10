@@ -1,3 +1,4 @@
+import { childrenOf, descendants } from '../../domain/categories';
 import { compareOptions } from '../../domain/periods';
 import { deleteStatement, withNewPeriod } from '../components/PeriodPrompt';
 import { useEffect, useMemo, useState } from 'react';
@@ -151,10 +152,24 @@ function Categories() {
     update((d) => ({ ...d, categories: [...d.categories, { id, name: name.trim(), kind, parentId }] }));
   };
   const remove = (c: Category) => {
-    const n = (usage.get(c.id) ?? 0) + data.categories.filter((x) => x.parentId === c.id).length;
-    if (n && !confirm(`"${c.name}" bruges ${n} steder. Slet alligevel? Beløbene vises som "Slettet kategori", indtil du flytter dem.`)) return;
-    update((d) => ({ ...d, categories: d.categories.filter((x) => x.id !== c.id && x.parentId !== c.id) }));
+    const ids = descendants(data.categories, c.id);
+    const n = ids.reduce((s, id) => s + (usage.get(id) ?? 0), 0);
+    const subs = ids.length - 1;
+    if ((n || subs) && !confirm(`"${c.name}"${subs ? ` har ${subs} underkategori${subs > 1 ? 'er' : ''}, der også slettes` : ''}${n ? `${subs ? ', og' : ''} bruges ${n} steder` : ''}. Slet alligevel?${n ? ' Beløbene vises som "Slettet kategori", indtil du flytter dem.' : ''}`)) return;
+    update((d) => ({ ...d, categories: d.categories.filter((x) => !ids.includes(x.id)) }));
   };
+  /** Én kategori med dens underkategorier – i vilkårlig dybde. */
+  const node = (c: Category, depth: number): React.ReactNode => (
+    <div key={c.id} className={depth ? 'cat-sub' : 'cat-top'}>
+      <div className="row cat-line">
+        <input className={`grow ${depth ? 'sm' : ''}`} value={c.name} onChange={(ev) => set(c.id, { name: ev.target.value })} style={depth ? undefined : { fontWeight: 600 }} aria-label={`Navn på ${c.name}`} />
+        <span className="small muted" title="Antal transaktionslinjer med kategorien">{usage.get(c.id) ?? 0}</span>
+        <button className="btn sm ghost" title={`Ny underkategori under ${c.name}`} onClick={() => add(c.kind, c.id)}>+ Under</button>
+        <button className="btn sm ghost danger" onClick={() => remove(c)} aria-label={`Slet ${c.name}`}>✕</button>
+      </div>
+      {childrenOf(data.categories, c.id).map((k) => node(k, depth + 1))}
+    </div>
+  );
   if (!data.categories.length) {
     return (
       <div className="card msg">
@@ -175,23 +190,7 @@ function Categories() {
         <div key={kind} className="card">
           <div className="card-head"><h2 className="grow">{kind === 'income' ? 'Indtægter' : kind === 'expense' ? 'Udgifter' : KIND_NAME.both}</h2><button className="btn sm" onClick={() => add(kind)}>+ Kategori</button></div>
           {kind === 'both' && <InfoBox label="Hvad er begge veje?">Fx renter eller afkast: et positivt beløb er en indtægt, et negativt en udgift.</InfoBox>}
-          {data.categories.filter((c) => c.kind === kind && !c.parentId).map((top) => (
-            <div key={top.id} style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}>
-              <div className="row">
-                <input className="grow" value={top.name} onChange={(ev) => set(top.id, { name: ev.target.value })} style={{ fontWeight: 600 }} />
-                <span className="small muted">{usage.get(top.id) ?? 0}</span>
-                <button className="btn sm ghost" onClick={() => add(kind, top.id)}>+ Under</button>
-                <button className="btn sm ghost danger" onClick={() => remove(top)} aria-label={`Slet ${top.name}`}>✕</button>
-              </div>
-              {data.categories.filter((c) => c.parentId === top.id).map((c) => (
-                <div key={c.id} className="row" style={{ paddingLeft: 24, marginTop: 4 }}>
-                  <input className="grow sm" value={c.name} onChange={(ev) => set(c.id, { name: ev.target.value })} />
-                  <span className="small muted">{usage.get(c.id) ?? 0}</span>
-                  <button className="btn sm ghost danger" onClick={() => remove(c)} aria-label={`Slet ${c.name}`}>✕</button>
-                </div>
-              ))}
-            </div>
-          ))}
+          {data.categories.filter((c) => c.kind === kind && !c.parentId).map((top) => node(top, 0))}
         </div>
       ))}
     </div>

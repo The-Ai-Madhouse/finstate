@@ -644,3 +644,39 @@ describe('årlige financial statements', () => {
     expect(migratePeriods(d)).toBe(d);
   });
 });
+
+describe('underkategorier i flere niveauer', () => {
+  it('sums the whole subtree, keeps own postings apart, and filters/inherits through all levels', async () => {
+    const { filterTxs } = await import('./txfilter');
+    const { isPassive } = await import('./cashflow');
+    const { categoryPath, descendants } = await import('./categories');
+    const base = emptyData();
+    const categories = [
+      { id: 'ex-bolig', name: 'Bolig', kind: 'expense' as const, passive: true },
+      { id: 'ex-bolig--el', name: 'El & varme', kind: 'expense' as const, parentId: 'ex-bolig' },
+      { id: 'ex-bolig--el--varme', name: 'Varme', kind: 'expense' as const, parentId: 'ex-bolig--el' },
+    ];
+    const tx = (id: string, amount: number, categoryId: string) => ({ id, accountId: 'a', date: '2025-03-01', text: id, amount, seq: 0, importedAt: '', manual: { type: 'expense' as const, categoryId } });
+    const d = {
+      ...base,
+      settings: { ...base.settings, bookStart: '2024-12-31', bookStartSet: true },
+      categories,
+      accounts: [{ id: 'a', name: 'Lønkonto', kind: 'bank' as const, side: 'asset' as const, aliases: [] }],
+      periods: [{ id: 'p', name: '2025', start: '2025-01-01', end: '2025-12-31' }],
+      txs: [tx('t1', -30000, 'ex-bolig--el--varme'), tx('t2', -10000, 'ex-bolig--el'), tx('t3', -5000, 'ex-bolig')],
+    };
+    const e = buildEngine(d);
+    const bolig = e.statement(d.periods[0]).expense[0];
+    expect(bolig.amount).toBe(45000);
+    const el = bolig.children.find((c) => c.id === 'ex-bolig--el')!;
+    expect(el.amount).toBe(40000);
+    expect(el.children.map((c) => [c.id, c.amount])).toEqual([['ex-bolig--el--varme', 30000], ['ex-bolig--el#own', 10000]]);
+    expect(bolig.children.find((c) => c.own)!.amount).toBe(5000);
+    expect(el.cats.sort()).toEqual(['ex-bolig--el', 'ex-bolig--el--varme']);
+    expect(categoryPath(categories, 'ex-bolig--el--varme')).toBe('Bolig › El & varme › Varme');
+    expect(descendants(categories, 'ex-bolig')).toHaveLength(3);
+    expect(isPassive(categories, 'ex-bolig--el--varme')).toBe(true); // arver fra Bolig to niveauer oppe
+    const f = { q: '', type: 'all' as const, status: 'all' as const, withNote: false, sort: 'date-asc' as const, categoryId: 'ex-bolig--el' };
+    expect(filterTxs(d.txs, e.resolved, categories, f).map((t) => t.id).sort()).toEqual(['t1', 't2']);
+  });
+});

@@ -590,3 +590,8 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 [data-t='internal'].split-type { color: var(--type-internal); } .split-bar > [data-t='internal'] { background: var(--type-internal); }
 [data-t='outlay'].split-type { color: var(--type-outlay); } .split-bar > [data-t='outlay'] { background: var(--type-outlay); }
 .split-bd-sum { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 4px; font-size: 12px; color: var(--ink-2); }
+
+/* Kategoritræet under Indstillinger: vilkårlig dybde, indrykket med en tynd linje */
+.cat-top { border-top: 1px solid var(--line); padding: 6px 0; }
+.cat-sub { margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--line); }
+.cat-line { margin-top: 4px; flex-wrap: nowrap; }

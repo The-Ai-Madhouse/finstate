@@ -1,6 +1,6 @@
 # Finstate
 
-Personligt financial statement (halvår/år) – dobbelt bogholderi, 100 % lokalt i browseren.
+Personligt financial statement (årligt – Regnskab kan også vise et halvår) – dobbelt bogholderi, 100 % lokalt i browseren.
 
 ```bash
 npm install
@@ -37,6 +37,7 @@ Egenkapitalkonti: kategorier + `opening`. Hver hændelse er i balance, så **Δ 
 - en post står som aktiv ved positiv saldo og som passiv ved negativ;
 - poster der tastes selv: *uforklaret ændring = ny værdi − gammel værdi − overførsler* bogføres som afkast/renter (kan specificeres);
 - kategorier er indtægt, udgift eller *begge veje* (fx renter): positivt beløb er indtægt, negativt udgift.
+- kategoritræet kan have underkategorier i vilkårlig dybde; en kategoris beløb er summen af hele dens undertræ.
 
 Klassifikation (`src/domain/classify.ts`), i prioriteret rækkefølge:
 dit valg → regel → konto-alias → beløbsmatch mellem egne konti → bankmapping → bankens nøgleord.

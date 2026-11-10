@@ -1,3 +1,4 @@
+import { ancestors } from '../../domain/categories';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { useState } from 'react';
 import { inPeriod } from '../../domain/engine';
@@ -37,7 +38,7 @@ export function StatementView() {
       const r = e.resolved.get(t.id)!;
       for (const l of r.lines) {
         const cat = data.categories.find((c) => c.id === l.categoryId);
-        const top = cat?.parentId ? data.categories.find((c) => c.id === cat.parentId) : cat;
+        const top = cat ? ancestors(data.categories, cat.id)[0] : undefined;
         rows.push([
           t.date, data.accounts.find((a) => a.id === t.accountId)?.name ?? '', t.text, kr2f(l.amount), t.balance !== undefined ? kr2f(t.balance) : '',
           TX_TYPE_LABEL[l.type], cat?.name ?? '', top?.name ?? '', l.counterparty ?? data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? '', r.source, t.note ?? '', t.memo ?? '',
@@ -49,10 +50,13 @@ export function StatementView() {
 
   const exportStatement = () => {
     const rows: string[][] = [['Sektion', 'Post', 'Underpost', view.name, prevP?.name ?? '']];
-    const cats = (title: string, now: CatTotal[], pv?: CatTotal[]) => {
+    const prevOf = new Map<string, number>();
+    const collect = (list?: CatTotal[]) => { for (const c of list ?? []) { prevOf.set(c.id, c.amount); collect(c.children); } };
+    collect(prev?.income); collect(prev?.expense);
+    const cats = (title: string, now: CatTotal[], pv?: CatTotal[], path: string[] = []) => {
       for (const c of now) {
-        rows.push([title, c.name, '', kr2f(c.amount), pv ? kr2f(pv.find((x) => x.id === c.id)?.amount ?? 0) : '']);
-        for (const ch of c.children) rows.push([title, c.name, ch.name, kr2f(ch.amount), pv ? kr2f(pv.find((x) => x.id === c.id)?.children.find((y) => y.id === ch.id)?.amount ?? 0) : '']);
+        rows.push([title, path[0] ?? c.name, path.length ? [...path.slice(1), c.name].join(' › ') : '', kr2f(c.amount), pv ? kr2f(prevOf.get(c.id) ?? 0) : '']);
+        cats(title, c.children, pv, c.own ? path : [...path, c.name]);
       }
     };
     cats('Indtægter', s.income, prev?.income);
@@ -143,19 +147,19 @@ function PlSection({ title, kind, now, uncat, total, months, compareTo, period }
   const [open, setOpen] = useState<Set<string>>(new Set());
   const prevList = compareTo ? (kind === 'income' ? compareTo.s.income : compareTo.s.expense) : undefined;
   const pm = (v: number) => perMonth(v, months);
-  const ppm = (id: string, sub?: string) => {
-    if (!prevList || !compareTo) return 0;
-    const c = prevList.find((x) => x.id === id);
-    const v = sub ? c?.children.find((x) => x.id === sub)?.amount ?? 0 : c?.amount ?? 0;
-    return perMonth(v, compareTo.cf.months);
-  };
+  // Sammenligningens beløb pr. kategori (alle niveauer; "(uden underkategori)" har sit eget id).
+  const prevAmount = new Map<string, number>();
+  const collect = (list: CatTotal[]) => { for (const c of list) { prevAmount.set(c.id, c.amount); collect(c.children); } };
+  if (prevList) collect(prevList);
+  const ppm = (id: string) => (compareTo ? perMonth(prevAmount.get(id) ?? 0, compareTo.cf.months) : 0);
   const delta = (cur: number, before: number) => {
     const d = cur - before;
     const good = kind === 'income' ? d >= 0 : d <= 0;
     return <span className={Math.abs(d) < 50 ? 'muted' : good ? 'pos' : 'neg'}><Money v={d} signed /></span>;
   };
   const togglePassive = (id: string) => update((d) => ({ ...d, categories: d.categories.map((c) => (c.id === id ? { ...c, passive: !isPassive(d.categories, id) } : c)) }));
-  const visible = now.filter((c) => c.amount || (prevList && prevList.find((x) => x.id === c.id)?.amount));
+  const shows = (c: CatTotal) => !!(c.amount || prevAmount.get(c.id));
+  const visible = now.filter(shows);
   const [sources, setSources] = useState<{ title: string; refs: Set<string> }>();
   /** Klikbart beløb → "Hvor kommer det fra?" */
   const amountLink = (v: number, title: string, ids: string[]) => (
@@ -174,6 +178,28 @@ function PlSection({ title, kind, now, uncat, total, months, compareTo, period }
         passiv
       </button>
     );
+  /** En kategori og – når den er foldet ud – dens underkategorier, i vilkårlig dybde. */
+  const rowsOf = (c: CatTotal, depth: number, path: string[]): React.ReactNode[] => {
+    const shown = c.children.filter(shows);
+    // Kun egne beløb (underkategorierne er tomme): ingen grund til at folde ud.
+    const kids = shown.length === 1 && shown[0].own ? [] : shown;
+    const isOpen = open.has(c.id);
+    const label = c.own ? [...path].join(' › ') : [...path, c.name].join(' › ');
+    const catId = c.own ? c.cats[0] : c.id;
+    const rows: React.ReactNode[] = [
+      <tr key={c.id} className={`${depth ? 'sub' : ''} ${kids.length ? 'click' : ''}`.trim() || undefined}
+        onClick={() => kids.length && setOpen(new Set(isOpen ? [...open].filter((x) => x !== c.id) : [...open, c.id]))}>
+        <td style={depth ? { paddingLeft: 10 + depth * 16 } : undefined}>
+          <span className="caret">{kids.length ? (isOpen ? '▾' : '▸') : ''}</span>{c.name} {passiveChip(catId)}
+        </td>
+        <td className="num">{amountLink(c.amount, label, c.cats.map((id) => `cat:${id}`))}</td>
+        <td className="num">{depth ? <Money v={pm(c.amount)} /> : <b><Money v={pm(c.amount)} /></b>}</td>
+        {compareTo && <><td className="num muted"><Money v={ppm(c.id)} /></td><td className="num">{delta(pm(c.amount), ppm(c.id))}</td></>}
+      </tr>,
+    ];
+    if (isOpen) for (const k of kids) rows.push(...rowsOf(k, depth + 1, c.own ? path : [...path, c.name]));
+    return rows;
+  };
   return (
     <div className="fs-section">
       <div className="fs-bar">{title}</div>
@@ -185,27 +211,7 @@ function PlSection({ title, kind, now, uncat, total, months, compareTo, period }
           </tr>
         </thead>
         <tbody>
-          {visible.flatMap((c) => {
-            const kids = c.children.filter((x) => x.amount || ppm(c.id, x.id));
-            const isOpen = open.has(c.id);
-            const rows = [
-              <tr key={c.id} className={kids.length ? 'click' : ''} onClick={() => kids.length && setOpen(new Set(isOpen ? [...open].filter((x) => x !== c.id) : [...open, c.id]))}>
-                <td>{kids.length ? <span className="caret">{isOpen ? '▾' : '▸'}</span> : <span className="caret" />}{c.name} {passiveChip(c.id)}</td>
-                <td className="num">{amountLink(c.amount, c.name, [c.id, ...c.children.map((k) => k.id)].map((id) => `cat:${id}`))}</td>
-                <td className="num"><b><Money v={pm(c.amount)} /></b></td>
-                {compareTo && <><td className="num muted"><Money v={ppm(c.id)} /></td><td className="num">{delta(pm(c.amount), ppm(c.id))}</td></>}
-              </tr>,
-            ];
-            if (isOpen) for (const k of kids) rows.push(
-              <tr key={c.id + k.id} className="sub">
-                <td>{k.name} {passiveChip(k.id)}</td>
-                <td className="num">{amountLink(k.amount, k.id === c.id ? c.name : `${c.name} › ${k.name}`, [`cat:${k.id}`])}</td>
-                <td className="num"><Money v={pm(k.amount)} /></td>
-                {compareTo && <><td className="num muted"><Money v={ppm(c.id, k.id)} /></td><td className="num">{delta(pm(k.amount), ppm(c.id, k.id))}</td></>}
-              </tr>,
-            );
-            return rows;
-          })}
+          {visible.flatMap((c) => rowsOf(c, 0, []))}
           {uncat !== 0 && <tr><td className="neg"><span className="caret" />Ukategoriseret</td><td className="num neg">{amountLink(uncat, 'det ukategoriserede', [`uncat:${kind}`])}</td><td className="num neg"><Money v={pm(uncat)} /></td>{compareTo && <><td /><td /></>}</tr>}
           <tr className="sum">
             <td>{title} i alt</td>
