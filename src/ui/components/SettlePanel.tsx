@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
-import { pairItems, settleState, unpair, writeOffDifference, type SettleItem } from '../../domain/settle';
+import { isSettled, pairItems, settleState, unpair, writeOffDifference, type SettleItem } from '../../domain/settle';
+import { acceptLinkDifference, linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { CategoryCombo, Money, InfoBox } from './common';
+import { CategoryCombo, Money, InfoBox, SearchCombo } from './common';
 
 /**
  * Afstemning af en post, der følger overførsler (udlæg, tilgodehavender, gæld til personer):
@@ -125,5 +126,140 @@ function WriteOff({ onPick, sum }: { onPick: (categoryId: string) => void; sum: 
       <CategoryCombo className="sm" primaryKind={sum > 0 ? 'expense' : 'income'} onChange={(id) => { if (id) { onPick(id); setOpen(false); } }} placeholder="vælg kategori" />
       <button className="btn sm ghost" onClick={() => setOpen(false)} aria-label="Annullér">✕</button>
     </span>
+  );
+}
+
+/** Gør en post klar til afstemning (eller fjern den igen). */
+export const setPostSettle = (id: string, settle: boolean) =>
+  useStore.getState().update((d) => ({ ...d, accounts: d.accounts.map((a) => (a.id === id ? { ...a, settle } : a)) }));
+
+/**
+ * Afstemning: det, du har valgt at afstemme i perioden –
+ *  · poster, der følger dine overførsler (fx "Jonas skylder mig"): par bevægelserne og afskriv en difference
+ *  · transaktioner, du har markeret som "hører sammen" i Kategorisér (fx et køb og en refusion)
+ */
+export function SettleOverview() {
+  const e = useEngine();
+  const period = usePeriod();
+  const focus = useStore((s) => s.transferFocus);
+  const [openId, setOpenId] = useState<string>();
+  const [adding, setAdding] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const tracked = e.data.accounts.filter((a) => a.kind === 'tracked');
+  const posts = tracked.filter((a) => isSettled(e.data, a));
+  const candidates = tracked.filter((a) => !isSettled(e.data, a) && !a.archived);
+  const groups = linkGroups(e.data, period);
+  // Kommer man fra en post eller "hører sammen": fold posten ud / rul hertil.
+  useEffect(() => {
+    if (!focus?.settle) return;
+    if (focus.postId) setOpenId(focus.postId);
+    useStore.getState().clearTransferFocus();
+    setTimeout(() => ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
+  }, [focus]);
+  return (
+    <div className="card" ref={ref} id="afstemning">
+      <div className="card-head">
+        <h2 className="grow">Afstemning</h2>
+        {candidates.length > 0 && (adding ? (
+          <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+            <SearchCombo className="sm" options={candidates.map((a) => ({ id: a.id, label: a.name }))} value={undefined}
+              onChange={(id) => { if (id) { setPostSettle(id, true); setOpenId(id); setAdding(false); } }}
+              placeholder="Vælg post…" searchPlaceholder="Søg post…" ariaLabel="Tilføj post til afstemning" emptyText="Ingen post matcher" />
+            <button className="btn sm ghost" onClick={() => setAdding(false)} aria-label="Annullér">✕</button>
+          </span>
+        ) : <button className="btn sm" onClick={() => { setAdding(true); setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Tilføj post til afstemning"]')?.focus(), 0); }}>+ Tilføj post</button>)}
+      </div>
+      <InfoBox label="Hvad kan afstemmes?">
+        Her samles det, du har valgt at afstemme: <b>poster</b>, der følger dine overførsler (fx "Jonas skylder mig"), hvor du parrer et udlæg med tilbagebetalingen –
+        og <b>transaktioner, der hører sammen</b>, som du har knyttet sammen i Kategorisér (fx et køb og en refusion). Du ser med det samme, om det går op;
+        gør det ikke, kan du afskrive differencen.
+      </InfoBox>
+
+      <div className="section-label">Poster</div>
+      {!posts.length ? (
+        <div className="small muted">Ingen poster valgt. Tryk "+ Tilføj post" og vælg fx "Jonas skylder mig".</div>
+      ) : (
+        <table>
+          <thead><tr><th>Post</th><th className="num">Saldo ultimo</th><th>Uparrede</th><th>Går ikke op</th><th /></tr></thead>
+          <tbody>
+            {posts.map((a) => {
+              const st = settleState(e.data, e.ledger, a.id, period);
+              const bad = st.groups.filter((g) => g.sum !== 0).length;
+              const bal = st.items.reduce((s, i) => s + i.amount, 0);
+              return [
+                <tr key={a.id} className={`click ${openId === a.id ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button')) setOpenId(openId === a.id ? undefined : a.id); }}>
+                  <td><span className={`caret ${openId === a.id ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
+                  <td className="num"><Money v={bal} decimals /></td>
+                  <td>{st.open.length ? <span className="chip review">{st.open.length}</span> : <span className="chip user">0</span>}</td>
+                  <td>{bad ? <span className="chip review">{bad}</span> : <span className="muted small">–</span>}</td>
+                  <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn sm ghost" onClick={() => setOpenId(openId === a.id ? undefined : a.id)}>{openId === a.id ? 'Luk' : 'Afstem'}</button>
+                    <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id)}>Post →</button>
+                    <button className="btn sm ghost" title="Fjern fra afstemningen (dine grupper bevares)" aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { setPostSettle(a.id, false); if (openId === a.id) setOpenId(undefined); }}>✕</button>
+                  </td>
+                </tr>,
+                openId === a.id && <tr key={`${a.id}-p`} className="drawer-row"><td colSpan={5}><div className="drawer"><SettlePanel acc={a} /></div></td></tr>,
+              ];
+            })}
+          </tbody>
+        </table>
+      )}
+
+      <div className="section-label" style={{ marginTop: 16 }}>Transaktioner, der hører sammen</div>
+      {!groups.length
+        ? <div className="small muted">Ingen endnu. Brug "🔗 Hører sammen med…" ved en transaktion i Kategorisér – fx et køb og refusionen.</div>
+        : <div className="col" style={{ gap: 6 }}>{groups.map((g) => <LinkGroupCard key={g.id} g={g} />)}</div>}
+    </div>
+  );
+}
+
+/** Én gruppe af transaktioner, der hører sammen: summen, og om differencen er afskrevet. */
+function LinkGroupCard({ g }: { g: LinkGroup }) {
+  const data = useStore((s) => s.data);
+  const update = useStore((s) => s.update);
+  const showTx = useStore((s) => s.showTx);
+  const [note, setNote] = useState(g.note ?? '');
+  const acc = (id: string) => data.accounts.find((a) => a.id === id)?.name ?? '';
+  const ok = g.sum === 0 || g.accepted;
+  return (
+    <div className={`xfer-item ${ok ? '' : 'missing'}`}>
+      {g.txs.map((t) => (
+        <div key={t.id} className="row small carried-line" style={{ borderTop: 0, marginTop: 0, paddingTop: 2 }}>
+          <span className="muted" style={{ minWidth: 60 }}>{dateShort(t.date)}</span>
+          <span className="muted" style={{ minWidth: 110 }}>{acc(t.accountId)}</span>
+          <button className="linkish ellipsis" style={{ maxWidth: 380 }} title="Åbn i Kategorisér" onClick={() => showTx(t.id)}>{t.text}</button>
+          <span className="spacer" />
+          <Money v={t.amount} decimals colored />
+          <button className="btn sm ghost" title="Tag ud af gruppen" aria-label={`Tag ${t.text} ud af gruppen`} onClick={() => update((d) => unlinkTx(d, t.id))}>✕</button>
+        </div>
+      ))}
+      <div className="row small" style={{ gap: 8, marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
+        <span>I alt <b><Money v={g.sum} decimals signed /></b></span>
+        {g.sum === 0 ? <span className="chip user">✓ Går op</span>
+          : g.accepted ? <span className="chip user" title="Differencen står allerede i regnskabet under transaktionernes kategorier">✓ Difference afskrevet</span>
+          : <span className="chip review">Difference {kr(Math.abs(g.sum))}</span>}
+        {g.sum !== 0 && (
+          <input className="sm grow" style={{ minWidth: 160 }} value={note} placeholder="Note – fx hvorfor det ikke går op" aria-label="Note til gruppen"
+            onChange={(ev) => setNote(ev.target.value)} onBlur={() => note !== (g.note ?? '') && update((d) => ({ ...d, linkGroups: { ...(d.linkGroups ?? {}), [g.id]: { ...(d.linkGroups?.[g.id] ?? {}), note: note.trim() || undefined } } }))} />
+        )}
+        <span className="spacer" />
+        {g.sum !== 0 && (g.accepted
+          ? <button className="btn sm ghost" onClick={() => update((d) => acceptLinkDifference(d, g.id, false))}>Fortryd afskrivning</button>
+          : <button className="btn sm" title="Differencen står allerede i regnskabet under transaktionernes kategorier – her markerer du blot, at det er i orden" onClick={() => update((d) => acceptLinkDifference(d, g.id, true, note.trim() || undefined))}>Afskriv differencen</button>)}
+      </div>
+    </div>
+  );
+}
+
+/** I postens detaljer: afstemningen, hvis posten er valgt – ellers en knap til at vælge den. */
+export function SettleToggle({ acc }: { acc: Account }) {
+  const data = useStore((s) => s.data);
+  const on = isSettled(data, acc);
+  if (!on) return <div><button className="btn sm ghost" onClick={() => setPostSettle(acc.id, true)}>+ Afstem posten (par udlæg og tilbagebetalinger)</button></div>;
+  return (
+    <div className="col" style={{ gap: 4 }}>
+      <SettlePanel acc={acc} />
+      <div><button className="btn sm ghost" onClick={() => setPostSettle(acc.id, false)}>Stop afstemning af posten</button></div>
+    </div>
   );
 }

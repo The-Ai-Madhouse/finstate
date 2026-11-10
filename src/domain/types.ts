@@ -244,6 +244,8 @@ export interface AppData {
   imports: ImportRecord[];
   /** Afstemning af udlæg/tilgodehavender: hvad hører sammen. */
   matches: Match[];
+  /** "Hører sammen"-grupper (Tx.link): en afskrevet difference (beløbet, da den blev godkendt) og evt. en note. */
+  linkGroups?: Record<string, { accepted?: number; note?: string }>;
   periods: Period[];
   /** periodId -> slideKey -> brugerens tekst (overstyrer forslag). */
   slideNotes: Record<string, Record<string, string>>;

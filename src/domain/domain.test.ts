@@ -840,3 +840,25 @@ describe('flyt kategorier', () => {
     expect(moveCategory(m, 'ex-bolig', { before: 'in-loen' })).toBe(m);
   });
 });
+
+describe('afstemning af transaktioner, der hører sammen', () => {
+  it('shows the difference, lets you write it off, and asks again if the group changes', async () => {
+    const { linkTxs, linkGroups, acceptLinkDifference } = await import('./links');
+    const d0 = demoData();
+    const buy = d0.txs.find((t) => t.text.includes('Restaurant Havnehuset') && t.date === '2025-04-14')!;
+    const back = d0.txs.find((t) => t.text === 'MobilePay Jonas Lind' && t.date === '2025-04-15')!;
+    let d = linkTxs(d0, buy.id, back.id);
+    let [g] = linkGroups(d, d.periods[0]);
+    expect([g.sum, g.accepted]).toEqual([buy.amount + back.amount, false]);
+    expect(linkGroups(d, d.periods[1])).toEqual([]); // kun perioden
+    d = acceptLinkDifference(d, g.id, true, 'Jonas gav resten');
+    [g] = linkGroups(d, d.periods[0]);
+    expect([g.accepted, g.note]).toEqual([true, 'Jonas gav resten']);
+    // En ny transaktion i gruppen ændrer summen → skal godkendes igen
+    const extra = d0.txs.find((t) => t.text === 'MobilePay Jonas Lind' && t.date === '2025-07-15')!;
+    d = linkTxs(d, buy.id, extra.id);
+    expect(linkGroups(d, d.periods[0])[0].accepted).toBe(false);
+    // Regnskabet påvirkes ikke
+    expect(buildEngine(d).statement(d.periods[0]).result).toBe(buildEngine(d0).statement(d0.periods[0]).result);
+  });
+});

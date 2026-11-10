@@ -11,7 +11,8 @@ import { useStore } from '../../store/store';
 import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, SearchCombo, TypeSelect, InfoBox } from '../components/common';
 import { valuationResultInPeriod } from '../../domain/ledger';
 import { BalanceSourcesDialog } from '../components/SourcesDialog';
-import { SettlePanel } from '../components/SettlePanel';
+import { SettleToggle } from '../components/SettlePanel';
+import { isSettled } from '../../domain/settle';
 
 export function BalanceView() {
   const period = usePeriod();
@@ -316,8 +317,8 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
 
         {acc.kind === 'tracked' && (
           <section className="drawer-sec full">
-            <h4>Par bevægelserne i {period.name}</h4>
-            <SettlePanel acc={acc} />
+            <h4>Afstemning i {period.name}</h4>
+            <SettleToggle acc={acc} />
           </section>
         )}
       </div>
@@ -500,7 +501,8 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
   const [all, setAll] = useState(false);
   // Poster, der ikke er importerede bankkonti (fx en person eller et lån): vis bevægelserne – de hører sammen via posten.
   const imported = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
-  const moves = imported || acc.kind === 'tracked' ? [] : postMovements(e.data, e.resolved, acc.id, period);
+  // Afstemte poster viser bevægelserne i afstemningen nedenfor.
+  const moves = imported || (acc.kind === 'tracked' && isSettled(e.data, acc)) ? [] : postMovements(e.data, e.resolved, acc.id, period);
   if (!total && !moves.length) return null;
   const KINDS: TransferKind[] = ['pair', 'direct', 'transit', 'missing'];
   const sign = acc.side === 'asset' ? 1 : -1;
@@ -534,7 +536,7 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
           <span key={k} className={`chip ${k === 'pair' ? 'user' : k === 'missing' ? 'review' : ''}`} title={TIP[k]}>{k === 'pair' ? '⇄ ' : ''}{counts[k]} {TRANSFER_LABEL[k].toLowerCase()}</span>
         ))}
         <span className="spacer" />
-        {total > 0 && <button className="btn sm" onClick={() => showTransfers(acc.kind === 'tracked' ? { postId: acc.id } : { accountId: acc.id })}>Se og ret i Overførsler →</button>}
+        {total > 0 && <button className="btn sm" onClick={() => showTransfers({ accountId: acc.id })}>Se og ret i Overførsler →</button>}
       </div>
     </section>
   );

@@ -27,3 +27,41 @@ export function unlinkTx(d: AppData, id: string): AppData {
   const drop = new Set([id, ...(rest.length === 1 ? [rest[0].id] : [])]);
   return { ...d, txs: d.txs.map((t) => { if (!drop.has(t.id)) return t; const n = { ...t }; delete n.link; return n; }) };
 }
+
+export interface LinkGroup {
+  id: string;
+  txs: Tx[];
+  /** Summen af transaktionerne (0 = går op). */
+  sum: number;
+  /** Differencen er afskrevet (godkendt) – og summen er stadig den samme som da. */
+  accepted: boolean;
+  note?: string;
+}
+
+/** Grupper med mindst én transaktion i perioden – til afstemningsoversigten. */
+export function linkGroups(d: Pick<AppData, 'txs' | 'linkGroups'>, period?: { start: string; end: string }): LinkGroup[] {
+  const by = new Map<string, Tx[]>();
+  for (const t of d.txs) if (t.link) by.set(t.link, [...(by.get(t.link) ?? []), t]);
+  const out: LinkGroup[] = [];
+  for (const [id, txs] of by) {
+    if (txs.length < 2) continue;
+    if (period && !txs.some((t) => t.date >= period.start && t.date <= period.end)) continue;
+    txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const sum = txs.reduce((s, t) => s + t.amount, 0);
+    const meta = d.linkGroups?.[id];
+    out.push({ id, txs, sum, accepted: sum !== 0 && meta?.accepted === sum, note: meta?.note });
+  }
+  return out.sort((a, b) => (a.txs[0].date < b.txs[0].date ? -1 : 1));
+}
+
+/**
+ * Afskriv (godkend) differencen i en gruppe. Beløbene står allerede i regnskabet under transaktionernes kategorier,
+ * så intet bogføres – gruppen markeres blot som afstemt. Ændres gruppen bagefter, skal differencen godkendes igen.
+ */
+export function acceptLinkDifference(d: AppData, id: string, accept: boolean, note?: string): AppData {
+  const sum = d.txs.filter((t) => t.link === id).reduce((s, t) => s + t.amount, 0);
+  const groups = { ...(d.linkGroups ?? {}) };
+  if (accept) groups[id] = { ...groups[id], accepted: sum, ...(note !== undefined ? { note } : {}) };
+  else { const g = { ...groups[id] }; delete g.accepted; groups[id] = g; }
+  return { ...d, linkGroups: groups };
+}

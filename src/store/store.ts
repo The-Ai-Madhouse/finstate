@@ -28,9 +28,9 @@ interface State {
   showTx: (id: string) => void;
   clearFocusTx: () => void;
   /** Gå til Overførsler med fokus på en post (konto) eller én bestemt overførsel. */
-  /** postId: åbn "Direkte til post" med posten foldet ud (for at parre dens bevægelser). */
-  transferFocus?: { accountId?: string; txId?: string; postId?: string };
-  showTransfers: (focus: { accountId?: string; txId?: string; postId?: string }) => void;
+  /** settle: rul til Afstemning (postId: med posten foldet ud). Ellers: interne overførsler for en konto/én overførsel. */
+  transferFocus?: { accountId?: string; txId?: string; postId?: string; settle?: boolean };
+  showTransfers: (focus: { accountId?: string; txId?: string; postId?: string; settle?: boolean }) => void;
   clearTransferFocus: () => void;
   /** "Hører sammen med": transaktionen, man er ved at knytte til en anden (klik på den anden i listen). */
   linkPick?: string;

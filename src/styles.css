@@ -687,3 +687,7 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .xfer-txlink:hover { color: var(--accent); }
 .tx-rel-pair { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .direct-posts td { vertical-align: middle; }
+/* Klikbare tekster i lister: understreg først ved hover, så listen ikke bliver urolig */
+.xfer-txlink, .xfer-side .linkish, .tx-rel .linkish, .tx-links .linkish, .post-moves .linkish, .xfer-item .linkish { text-decoration: none; }
+.xfer-txlink:hover, .xfer-side .linkish:hover, .tx-rel .linkish:hover, .tx-links .linkish:hover, .post-moves .linkish:hover, .xfer-item .linkish:hover { text-decoration: underline; }
+.xfer-side .linkish { color: var(--ink); }

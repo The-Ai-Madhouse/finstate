@@ -10,7 +10,7 @@ import { setMemo, useEngine, usePeriod } from '../../store/actions';
 import { balancesAt, isTransitRef, transitName } from '../../domain/ledger';
 import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
 import { postMovements, transferInfo } from '../../domain/transfers';
-import { settleState } from '../../domain/settle';
+import { isSettled, settleState } from '../../domain/settle';
 import { dateShort } from '../../domain/format';
 import { KIND_LABEL, NO_TYPE, addAccountType, noteFor, suggestCategory, withAccountInPeriods } from '../../domain/accountTypes';
 import { addDays, uid } from '../../domain/util';
@@ -686,6 +686,8 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   const setAdding = (on: boolean) => setLinkPick(on ? tx.id : undefined);
   const others = linkedWith(txs, tx);
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
+  const accepted = useStore((s) => (tx.link ? s.data.linkGroups?.[tx.link]?.accepted === sum : false));
+  const showTransfers = useStore((s) => s.showTransfers);
   const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '';
   const options = adding
     ? txs
@@ -708,6 +710,9 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
             </span>
           ))}
           <span className="small muted">i alt <span className={sum === 0 ? 'pos' : ''}>{kr2f(sum)}{sum === 0 ? ' ✓' : ''}</span></span>
+          {sum !== 0 && (accepted
+            ? <span className="chip user" title="Differencen er afskrevet under Afstemning">✓ afskrevet</span>
+            : <button className="tx-link-x" title="Se gruppen under Afstemning – og afskriv differencen" onClick={() => showTransfers({ settle: true })}>Afstem →</button>)}
           <button className="tx-link-x" title="Fjern denne transaktion fra gruppen" aria-label="Fjern fra gruppen" onClick={() => update((d) => unlinkTx(d, tx.id))}>Fjern</button>
         </div>
       )}
@@ -771,7 +776,8 @@ function TxRelations({ tx }: { tx: Tx }) {
   const others = postMovements(e.data, e.resolved, target.id, period).filter((t) => t.id !== tx.id);
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
   // Poster, der følger overførsler (fx en person): er bevægelsen parret med det, den hører sammen med – og går det op?
-  const st = target.kind === 'tracked' ? settleState(e.data, e.ledger, target.id, period) : undefined;
+  // Kun poster, du har valgt at afstemme.
+  const st = target.kind === 'tracked' && isSettled(e.data, target) ? settleState(e.data, e.ledger, target.id, period) : undefined;
   const group = st?.groups.find((g) => g.items.some((i) => i.key === `tx:${tx.id}`));
   const mates = group?.items.filter((i) => i.key !== `tx:${tx.id}`) ?? [];
   const pairing = st && (
@@ -785,7 +791,7 @@ function TxRelations({ tx }: { tx: Tx }) {
             : <span key={m.key} className="small">{m.primo ? 'saldo primo' : m.text} {kr2f(m.amount)}</span>))}
         </>
       ) : <span className="chip review" title="Par den med det, den hører sammen med – fx udlægget og tilbagebetalingen">Ikke parret</span>}
-      <button className="tx-link-x" title="Par bevægelserne på posten – og afskriv en evt. difference" onClick={() => showTransfers({ postId: target.id })}>{group ? 'Ret parring →' : 'Par i Overførsler →'}</button>
+      <button className="tx-link-x" title="Par bevægelserne på posten – og afskriv en evt. difference" onClick={() => showTransfers({ settle: true, postId: target.id })}>{group ? 'Ret i Afstemning →' : 'Par i Afstemning →'}</button>
     </div>
   );
   return (
