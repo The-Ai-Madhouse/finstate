@@ -92,6 +92,10 @@ export interface Tx {
   note?: string;
   /** Brugerens egen note, skrevet i Finstate. */
   memo?: string;
+  /** Parret manuelt med denne transaktion (modposten peger tilbage). Har forrang over automatisk parring. */
+  pairWith?: string;
+  /** Brugeren har ophævet en automatisk parring – transaktionen parres ikke automatisk igen. */
+  noAutoPair?: boolean;
 }
 
 /** En importeret fil: hvilke transaktioner den indeholdt (også dem, der fandtes i forvejen). */

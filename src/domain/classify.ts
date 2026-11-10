@@ -131,8 +131,8 @@ const TRANSFERISH = /\b(overf\w*|til|fra|opsparing|konto|budget)\b/i;
 const USER_DECIDED: ReadonlySet<Source> = new Set(['split', 'manual', 'rule']);
 
 /**
- * Resolverer alle transaktioner. Interne overførsler parres på tværs af konti
- * (modsat beløb, ≤ 7 dages forskel, tætteste dato først).
+ * Resolverer alle transaktioner. Interne overførsler parres på tværs af konti:
+ * først dine egne parringer, derefter automatisk (modsat beløb, ≤ 7 dages forskel, tætteste dato først).
  */
 export function resolveAll(data: Pick<AppData, 'rules' | 'accounts' | 'bankMap' | 'txs'> & { settings?: AppData['settings']; categories?: AppData['categories'] }): Map<string, Resolved> {
   const ctx = makeCtx(data);
@@ -151,7 +151,13 @@ export function resolveAll(data: Pick<AppData, 'rules' | 'accounts' | 'bankMap' 
     const t = r.lines[0]?.targetAccountId;
     return !!t && !!ctx.accounts.get(t) && ctx.accounts.get(t)!.kind !== 'bank';
   };
+  // Dine egne parringer (begge peger på hinanden).
+  const txById = new Map(data.txs.map((t) => [t.id, t]));
+  const explicit = new Map<string, string>();
+  const isInternal = (id: string) => s1.get(id)?.lines.every((l) => l.type === 'internal') ?? false;
+  for (const t of data.txs) if (t.pairWith && txById.get(t.pairWith)?.pairWith === t.id && isInternal(t.id) && isInternal(t.pairWith)) explicit.set(t.id, t.pairWith);
   const cands = data.txs.filter((tx) => {
+    if (explicit.has(tx.id) || tx.noAutoPair) return false;
     const r = s1.get(tx.id);
     if (r) return r.lines.length === 1 && r.lines[0].type === 'internal' && !isValuationTarget(r);
     // Uafklarede transaktioner foreslås kun som interne, hvis beløbsmatch er slået til.
@@ -183,7 +189,7 @@ export function resolveAll(data: Pick<AppData, 'rules' | 'accounts' | 'bankMap' 
       }
   }
   pairs.sort((x, y) => x.d - y.d);
-  const paired = new Map<string, string>();
+  const paired = new Map<string, string>(explicit);
   for (const { a, b } of pairs) {
     if (paired.has(a.id) || paired.has(b.id)) continue;
     paired.set(a.id, b.id);

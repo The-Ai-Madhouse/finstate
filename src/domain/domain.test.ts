@@ -117,10 +117,12 @@ describe('demo: hele motoren', () => {
   });
 
   it('moves the delayed new-year transfer to "Penge undervejs" and clears it next period', () => {
-    expect(balancesAt(e.ledger, '2025-12-31').get('transit')).toBe(600000);
-    expect(balancesAt(e.ledger, '2026-01-02').get('transit') ?? 0).toBe(0);
+    // Undervejs til Fælles opsparing – dér skal pengene lande.
+    expect(balancesAt(e.ledger, '2025-12-31').get('transit:acc-ops')).toBe(600000);
+    expect(balancesAt(e.ledger, '2026-01-02').get('transit:acc-ops') ?? 0).toBe(0);
     const s = e.statement(h2);
-    expect(s.rows.find((r) => r.ref === 'transit')?.close).toBe(600000);
+    const row = s.rows.find((r) => r.ref === 'transit:acc-ops')!;
+    expect([row.close, row.label, row.kind]).toEqual([600000, 'Undervejs til Fælles opsparing', 'transit']);
   });
 
   it('pairs internal transfers and books depot transfers directly', () => {
@@ -443,7 +445,7 @@ describe('likvide midler uden import', () => {
     const d2 = { ...d, accounts: [...d.accounts, cash], txs: d.txs.map((t) => (t.id === tx.id ? { ...t, manual: { type: 'internal' as const, targetAccountId: cash.id } } : t)) };
     const b = balancesAt(buildEngine(d2).ledger, '2026-06-30');
     expect(b.get('acc:acc-kontanter')).toBe(-tx.amount);
-    expect(b.get('transit') ?? 0).toBe(balancesAt(buildEngine(d).ledger, '2026-06-30').get('transit') ?? 0);
+    expect(b.get('transit:acc-kontanter') ?? 0).toBe(0);
   });
 });
 
@@ -711,5 +713,23 @@ describe('periode for en importeret fil', () => {
     const f = importFiles(d2).find((x) => x.id === 'imp-acc-loen')!;
     expect([f.from, f.to, f.declared]).toEqual(['2025-01-01', '2026-08-10', true]);
     expect(importFiles(d).find((x) => x.id === 'imp-acc-loen')!.declared).toBe(false);
+  });
+});
+
+describe('egne parringer af interne overførsler', () => {
+  it('pairs manually across more than a week, and an undone auto pair stays undone', () => {
+    const d = demoData();
+    const out = d.txs.find((t) => t.text === 'Overførsel til Fælles opsparing' && t.date === '2025-03-10')!;
+    const inn = d.txs.find((t) => t.text === 'Overførsel fra Lønkonto' && t.date === '2025-03-10')!;
+    expect(resolveAll(d).get(out.id)!.pairId).toBe(inn.id);
+    // Ophæv den automatiske parring
+    const undone = { ...d, txs: d.txs.map((t) => (t.id === out.id || t.id === inn.id ? { ...t, noAutoPair: true } : t)) };
+    expect(resolveAll(undone).get(out.id)!.pairId).toBeUndefined();
+    // Par manuelt med en modpost en måned senere
+    const later = d.txs.find((t) => t.text === 'Overførsel fra Lønkonto' && t.date === '2025-04-10')!;
+    const man = { ...undone, txs: undone.txs.map((t) => (t.id === out.id ? { ...t, pairWith: later.id, manual: { type: 'internal' as const, targetAccountId: 'acc-ops' } } : t.id === later.id ? { ...t, pairWith: out.id, manual: { type: 'internal' as const, targetAccountId: 'acc-loen' } } : t)) };
+    const r = resolveAll(man);
+    expect(r.get(out.id)!.pairId).toBe(later.id);
+    expect(r.get(later.id)!.pairId).toBe(out.id);
   });
 });

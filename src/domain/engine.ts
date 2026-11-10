@@ -110,7 +110,7 @@ export function periodChecks(e: Engine, p: Period): Check[] {
     if (r.pairId) return false;
     return r.lines.some((l) => l.type === 'internal' && !(l.targetAccountId && (data.accounts.find((a) => a.id === l.targetAccountId)?.kind ?? 'bank') !== 'bank'));
   });
-  const transit = st.rows.find((r) => r.ref === 'transit')?.close ?? 0;
+  const transit = st.rows.filter((r) => r.kind === 'transit').reduce((s, r) => s + r.close, 0);
   if (internalUnpaired.length) {
     out.push({ id: 'transit', level: transit ? 'info' : 'warn', title: `${internalUnpaired.length} interne overførsler uden modpost`, detail: transit ? `${kr(transit)} står som "Penge undervejs" ved periodens slutning – typisk overførsler, der først lander i næste periode.` : 'Uparrede overførsler går op i nul, men tjek dem.', view: 'transfers' });
   } else out.push({ id: 'transit', level: 'ok', title: 'Alle interne overførsler er parret' });

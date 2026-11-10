@@ -598,3 +598,22 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 
 /* Importerede filer: perioden som titel, filnavnet diskret nedenunder */
 .file-sub { max-width: 340px; padding-left: 18px; }
+
+/* Overførsler: interne overførsler som "fra → til" */
+.xfer-filters { margin: 4px 0 10px; flex-wrap: wrap; gap: 8px; }
+.xfer-list { display: flex; flex-direction: column; gap: 6px; }
+.xfer-row { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 110px 150px auto; gap: 10px; align-items: center; }
+.xfer-headrow { padding: 0 10px; }
+.xfer-item { border: 1px solid var(--line); border-left: 3px solid var(--good); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
+.xfer-item.missing { border-left-color: var(--warning); }
+.xfer-item.direct { border-left-color: var(--type-internal); }
+.xfer-item.editing { background: var(--surface-2); }
+.xfer-side { min-width: 0; }
+.xfer-side.expected { opacity: 0.75; border: 1px dashed var(--line-strong); border-radius: 6px; padding: 2px 8px; }
+.xfer-arrow { color: var(--muted); font-size: 16px; text-align: center; }
+.xfer-actions { gap: 4px; flex-wrap: nowrap; justify-content: flex-end; }
+.xfer-pick { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); gap: 10px; flex-wrap: wrap; }
+.xfer-edit { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.xfer-edit-line { display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 1000px) { .xfer-row { grid-template-columns: 1fr; } .xfer-arrow { display: none; } }
+.xfer-pick .combo { min-width: 300px; }

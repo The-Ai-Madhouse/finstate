@@ -35,6 +35,38 @@ export function setManual(ids: string[], cls: Classification | undefined) {
   }));
 }
 
+/** Par to transaktioner som én intern overførsel (hver peger på den anden konto). */
+export function pairTxs(aId: string, bId: string) {
+  update((d) => {
+    const a = d.txs.find((t) => t.id === aId), b = d.txs.find((t) => t.id === bId);
+    if (!a || !b) return d;
+    // Tidligere partnere mister deres parring.
+    const old = new Set([a.pairWith, b.pairWith].filter((x): x is string => !!x && x !== aId && x !== bId));
+    return {
+      ...d,
+      txs: d.txs.map((t) => {
+        if (t.id === aId || t.id === bId) {
+          const other = t.id === aId ? b : a;
+          const n: Tx = { ...t, manual: { type: 'internal', targetAccountId: other.accountId }, pairWith: other.id };
+          delete n.splits; delete n.noAutoPair;
+          return n;
+        }
+        if (old.has(t.id)) { const n = { ...t }; delete n.pairWith; return n; }
+        return t;
+      }),
+    };
+  });
+}
+
+/** Ophæv en parring. En automatisk parring huskes som fravalgt, så den ikke kommer igen. */
+export function unpairTxs(aId: string, bId: string) {
+  update(mapTx(new Set([aId, bId]), (t) => {
+    const n: Tx = { ...t, noAutoPair: true };
+    delete n.pairWith;
+    return n;
+  }));
+}
+
 export function setSplits(id: string, splits: Split[] | undefined) {
   update(mapTx(new Set([id]), (t) => ({ ...t, splits })));
 }

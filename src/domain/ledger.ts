@@ -4,7 +4,8 @@
  * Hver hændelse giver posteringer på to slags konti:
  *  - Balancekonti (aktiver positive, gæld negativ):
  *      acc:<id>   bank- og værdikonti
- *      transit    "Penge undervejs" – interne overførsler hvor modposten endnu ikke er bogført
+ *      transit    "Penge undervejs" – interne overførsler hvor modposten endnu ikke er bogført.
+ *                 Pr. modtagende konto: transit:<konto-id> (hvor pengene forventes at lande); "transit" = ukendt.
  *      cp:<navn>  tilgodehavende (+) / gæld (−) over for en person (udlæg)
  *  - Egenkapitalkonti (beløb = effekt på egenkapital; indtægt +, udgift −):
  *      cat:<id>, uncat:income, uncat:expense, opening
@@ -27,7 +28,10 @@ export interface Posting {
   openItemId?: string;
 }
 
-export const isBalanceRef = (ref: string) => ref.startsWith('acc:') || ref === 'transit' || ref.startsWith('cp:');
+export const isTransitRef = (ref: string) => ref === 'transit' || ref.startsWith('transit:');
+export const isBalanceRef = (ref: string) => ref.startsWith('acc:') || isTransitRef(ref) || ref.startsWith('cp:');
+/** Hvilken konto venter pengene på (undefined = ukendt)? */
+export const transitAccountId = (ref: string) => (ref.startsWith('transit:') ? ref.slice(8) : undefined);
 export const cpRef = (name: string) => `cp:${name.trim().toLowerCase()}`;
 
 export interface Ledger {
@@ -83,7 +87,9 @@ export function buildLedger(data: AppData, resolved: Map<string, Resolved>): Led
         case 'internal': {
           const target = line.targetAccountId ? accounts.get(line.targetAccountId) : undefined;
           const direct = target && (target.kind !== 'bank' || !txByAcc.has(target.id));
-          pl(tx.date, direct ? `acc:${target.id}` : 'transit', -line.amount, x);
+          // Undervejs pr. modtager: penge ud venter på målkontoen; penge ind er landet på denne konto.
+          const receiver = line.amount < 0 ? target?.id : tx.accountId;
+          pl(tx.date, direct ? `acc:${target.id}` : receiver && target ? `transit:${receiver}` : 'transit', -line.amount, x);
           break;
         }
         case 'outlay':
@@ -200,6 +206,10 @@ export interface Statement {
 }
 
 export function statement(data: AppData, ledger: Ledger, period: Period): Statement {
+  const transitLabel = (ref: string) => {
+    const id = transitAccountId(ref);
+    return id ? `Undervejs til ${data.accounts.find((a) => a.id === id)?.name ?? 'slettet konto'}` : 'Penge undervejs (ukendt modtager)';
+  };
   const before = balancesAt(ledger, addDays(period.start, -1));
   const after = balancesAt(ledger, period.end);
   const accounts = new Map(data.accounts.map((a) => [a.id, a]));
@@ -223,8 +233,8 @@ export function statement(data: AppData, ledger: Ledger, period: Period): Statem
       const sideVal = close || open;
       rows.push({
         ref,
-        label: ref === 'transit' ? 'Penge undervejs (interne overførsler)' : ledger.cpLabels.get(ref) ?? ref.slice(3),
-        kind: ref === 'transit' ? 'transit' : 'cp',
+        label: isTransitRef(ref) ? transitLabel(ref) : ledger.cpLabels.get(ref) ?? ref.slice(3),
+        kind: isTransitRef(ref) ? 'transit' : 'cp',
         side: bySign(open, close, sideVal >= 0 ? 'asset' : 'liability'),
         open,
         close,
