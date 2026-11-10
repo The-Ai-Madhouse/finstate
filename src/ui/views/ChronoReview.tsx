@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NEEDS_REVIEW, type Resolved } from '../../domain/classify';
-import { dateShort, kr } from '../../domain/format';
+import { dateShort } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
 import { setManual, useEngine, usePeriod } from '../../store/actions';
@@ -273,7 +273,9 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
       </div>
       <div className="num"><Money v={tx.amount} decimals colored /></div>
       {open && isSplit && !replaceSplit ? (
-        <SplitSummary r={r} onEdit={() => setShowSplit(true)} onReplace={() => setReplaceSplit(true)} />
+        <SplitBreakdown r={r} total={tx.amount} source={isPending ? r.source : undefined} onEdit={() => setShowSplit(true)} onReplace={() => setReplaceSplit(true)} />
+      ) : isSplit && !open ? (
+        <SplitBreakdown r={r} total={tx.amount} source={r.source} />
       ) : open ? (
         <div className="col" style={{ gap: 4 }}>
           <ClassEditor value={cls} onChange={setCls} amount={tx.amount} accountId={tx.accountId} txId={tx.id} compact onCommit={(c) => { setCls(c); commit(c); }} />
@@ -285,8 +287,6 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
           <SourceChip source={r.source} />
           <span>{r.lines.map((l) => (l.type === 'outlay' ? `Udlæg · ${l.counterparty}` : l.type === 'internal' ? `Intern${l.targetAccountId ? ` → ${e.data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? ''}` : ''}` : categoryLabel(e.data.categories, l.categoryId) || 'ukategoriseret')).join(' + ')}</span>
           {r.source === 'rule' && ruleOrigin && <span className="muted">· som {dateShort(ruleOrigin.date)}</span>}
-          {isSplit && <span className="chip split-chip" title="Transaktionen er delt op">Opdelt i {r.lines.length}</span>}
-          {isSplit && <span className="muted">({r.lines.map((l) => kr(Math.abs(l.amount))).join(' + ')})</span>}
         </div>
       )}
       <div className="row" style={{ flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
@@ -320,21 +320,42 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
   );
 }
 
-/** Redigering af en opdelt transaktion: vis delene tydeligt i stedet for ét kategorivalg. */
-function SplitSummary({ r, onEdit, onReplace }: { r: Resolved; onEdit: () => void; onReplace: () => void }) {
+const TYPE_SHORT: Record<string, string> = { income: 'Indtægt', expense: 'Udgift', internal: 'Intern', outlay: 'Udlæg' };
+
+/**
+ * En opdelt transaktion: hver del på sin egen linje med type, hvad den er, og beløb –
+ * plus en lille fordelingsbjælke og summen, så man kan se, at det går op.
+ */
+function SplitBreakdown({ r, total, source, onEdit, onReplace }: { r: Resolved; total: number; source?: Resolved['source']; onEdit?: () => void; onReplace?: () => void }) {
   const e = useEngine();
+  const whole = r.lines.reduce((s, l) => s + Math.abs(l.amount), 0) || 1;
+  const what = (l: Resolved['lines'][number]) =>
+    l.type === 'internal' ? `→ ${e.data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? 'vælg post'}`
+      : l.type === 'outlay' ? l.counterparty ?? ''
+      : categoryLabel(e.data.categories, l.categoryId) || 'ukategoriseret';
+  const sum = r.lines.reduce((s, l) => s + l.amount, 0);
   return (
-    <div className="split-summary">
-      <div className="small"><b>Opdelt i {r.lines.length} dele</b></div>
+    <div className="split-bd">
+      <div className="split-bd-head">
+        <b>Opdelt i {r.lines.length} dele</b>
+        {source && source !== 'split' && <SourceChip source={source} />}
+        <span className="spacer" />
+        {onEdit && <button className="btn sm" onClick={onEdit}>Ret opdeling</button>}
+        {onReplace && <button className="btn sm ghost" onClick={onReplace}>Erstat med én kategori</button>}
+      </div>
+      <div className="split-bar" aria-hidden>
+        {r.lines.map((l, i) => <span key={i} data-t={l.type} style={{ flexGrow: Math.abs(l.amount) / whole }} />)}
+      </div>
       {r.lines.map((l, i) => (
-        <div key={i} className="row small" style={{ gap: 8, flexWrap: 'nowrap' }}>
-          <span className="grow ellipsis">{l.type === 'internal' ? `Intern → ${e.data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? '?'}` : categoryLabel(e.data.categories, l.categoryId) || 'ukategoriseret'}</span>
-          <Money v={l.amount} decimals />
+        <div key={i} className="split-bd-line">
+          <span className="split-type" data-t={l.type}>{TYPE_SHORT[l.type] ?? l.type}</span>
+          <span className={`ellipsis ${!l.categoryId && l.type !== 'internal' && l.type !== 'outlay' ? 'neg' : ''}`} title={what(l)}>{what(l)}</span>
+          <span className="num"><Money v={l.amount} decimals /></span>
         </div>
       ))}
-      <div className="row" style={{ gap: 6, marginTop: 4 }}>
-        <button className="btn sm" onClick={onEdit}>Ret opdeling</button>
-        <button className="btn sm ghost" onClick={onReplace}>Erstat med én kategori</button>
+      <div className="split-bd-sum">
+        <span>I alt</span>
+        <span className="num"><Money v={sum} decimals />{sum === total ? <span className="pos"> ✓</span> : <span className="neg"> ≠ <Money v={total} decimals /></span>}</span>
       </div>
     </div>
   );

@@ -116,7 +116,8 @@ export function SimilarDialog({ tx, similar, initial, onClose, onApplied }: {
                 <div key={i} className="split-line">
                   <div className="split-amt">
                     <AmountInput className="sm" value={p.amt || undefined} placeholder="beløb" ariaLabel={`Fast beløb for del ${i + 1}`}
-                      onCommit={(v) => setParts(parts.map((x, j) => (j === i ? { ...x, amt: Math.abs(v ?? 0) } : x)))} />
+                      onLive={(v) => setParts((ps) => ps.map((x, j) => (j === i ? { ...x, amt: Math.abs(v ?? 0) } : x)))}
+                      onCommit={(v) => setParts((ps) => ps.map((x, j) => (j === i ? { ...x, amt: Math.abs(v ?? 0) } : x)))} />
                   </div>
                   <ClassEditor value={p.cls} amount={sign * Math.max(p.amt, 1)} accountId={tx.accountId} compact
                     onChange={(c) => setParts(parts.map((x, j) => (j === i ? { ...x, cls: c } : x)))} />

@@ -512,9 +512,11 @@ const sigCount = (s: string) => (s.match(/[\d,−-]/g) ?? []).length;
  * Beløbsfelt: tusindtalsseparator mens man skriver og "kr" i slutningen.
  * Gemmer ved Enter eller når feltet forlades.
  */
-export function AmountInput({ value, onCommit, className, placeholder, ariaLabel, autoFocus }: {
+export function AmountInput({ value, onCommit, onLive, className, placeholder, ariaLabel, autoFocus }: {
   value?: number;
   onCommit: (v: number | undefined) => void;
+  /** Kaldes for hvert tastetryk med det foreløbige beløb (fx så "resten" i en opdeling følger med). */
+  onLive?: (v: number | undefined) => void;
   className?: string;
   placeholder?: string;
   ariaLabel?: string;
@@ -544,6 +546,10 @@ export function AmountInput({ value, onCommit, className, placeholder, ariaLabel
           const before = sigCount(el.value.slice(0, caret));
           const next = formatAmountLive(el.value);
           setTxt(next);
+          if (onLive) {
+            const v = next.trim() === '' ? undefined : parseAmount(next.replace('−', '-'));
+            if (v !== null) onLive(v);
+          }
           // Sæt markøren efter samme antal betydende tegn som før formateringen.
           requestAnimationFrame(() => {
             if (!ref.current) return;

@@ -577,3 +577,16 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 /* Regnskab: vis hele året eller et halvår */
 .seg button:disabled { opacity: .45; cursor: not-allowed; }
 .card.warn-card { border-color: color-mix(in srgb, var(--warning) 60%, var(--line)); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
+
+/* Opdelt transaktion i Kategorisér: én linje pr. del */
+.split-bd { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; border: 1px solid var(--line-strong); border-left: 3px solid var(--type-internal); border-radius: 8px; background: var(--surface-2); min-width: 0; }
+.split-bd-head { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.split-bar { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; }
+.split-bar > span { flex-basis: 0; min-width: 4px; background: var(--ink-3, var(--muted)); }
+.split-bd-line { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.split-type { font-size: 11px; font-weight: 600; border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; text-align: center; color: var(--muted); }
+[data-t='income'].split-type { color: var(--type-income); } .split-bar > [data-t='income'] { background: var(--type-income); }
+[data-t='expense'].split-type { color: var(--type-expense); } .split-bar > [data-t='expense'] { background: var(--type-expense); }
+[data-t='internal'].split-type { color: var(--type-internal); } .split-bar > [data-t='internal'] { background: var(--type-internal); }
+[data-t='outlay'].split-type { color: var(--type-outlay); } .split-bar > [data-t='outlay'] { background: var(--type-outlay); }
+.split-bd-sum { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 4px; font-size: 12px; color: var(--ink-2); }
