@@ -33,14 +33,20 @@ interface State {
   showTransfers: (focus: { accountId?: string; txId?: string; postId?: string; settle?: boolean }) => void;
   clearTransferFocus: () => void;
   /** "Hører sammen med": transaktionen, man er ved at knytte til en anden (klik på den anden i listen). */
-  linkPick?: string;
-  setLinkPick: (txId?: string) => void;
+  linkPick?: LinkPick;
+  setLinkPick: (pick?: LinkPick) => void;
   /** Gå til Aktiver & passiver med en post foldet ud. */
   balanceFocus?: string;
   showPost: (accountId: string) => void;
   clearBalanceFocus: () => void;
   setPeriod: (id?: string) => void;
 }
+
+/**
+ * Vælg en anden transaktion (søg eller klik i listen):
+ *  link = "hører sammen med" · post = par på en afstemt post (fx udlæg ↔ tilbagebetaling) · bank = find modposten til en overførsel mellem dine konti
+ */
+export type LinkPick = { txId: string; mode: 'link' | 'post' | 'bank'; postId?: string; periodId?: string };
 
 export type LedgerFilter = TxFilter;
 export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status: 'all', withNote: false, sort: 'date-asc' };

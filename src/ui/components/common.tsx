@@ -1,12 +1,12 @@
 import { categoryPath, flattenTree } from '../../domain/categories';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NEEDS_REVIEW, SOURCE_LABEL, type Source } from '../../domain/classify';
-import type { Check } from '../../domain/engine';
+import type { Check, Engine } from '../../domain/engine';
 import { kr, kr2f, parseAmount } from '../../domain/format';
-import { type Account, type Category, type Classification, type Tx, type TxType } from '../../domain/types';
+import { type Account, type Category, type Classification, type Period, type Tx, type TxType } from '../../domain/types';
 import { newCategoryId } from '../../domain/defaults';
-import { useData, useStore, type View } from '../../store/store';
-import { setMemo, useEngine, usePeriod } from '../../store/actions';
+import { useData, useStore, type LinkPick, type View } from '../../store/store';
+import { pairOnPost, pairTxs, setMemo, useEngine, usePeriod } from '../../store/actions';
 import { balancesAt, isTransitRef, transitName } from '../../domain/ledger';
 import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
 import { postMovements, transferInfo } from '../../domain/transfers';
@@ -670,32 +670,73 @@ export function TxNotes({ tx }: { tx: Tx }) {
   );
 }
 
+/** Hvad "vælg en anden transaktion" skal gøre for denne transaktion – eller intet (fx parrede overførsler). */
+function pickModeFor(e: Engine, tx: Tx, period?: Period): Omit<LinkPick, 'txId'> | undefined {
+  const info = period ? transferInfo(e.data, e.resolved, e.txById, tx, period) : undefined;
+  if (!info) return { mode: 'link' };
+  if (info.kind === 'missing') return { mode: 'bank' };
+  if (info.kind === 'direct' && info.target?.kind === 'tracked' && period) {
+    const inGroup = settleState(e.data, e.ledger, info.target.id, period).groups.some((g) => g.items.some((i) => i.key === `tx:${tx.id}`));
+    return inGroup ? undefined : { mode: 'post', postId: info.target.id, periodId: period.id };
+  }
+  return undefined; // parret, undervejs eller direkte til en post, du taster selv – intet at vælge her
+}
+
+/** Kan transaktionen vælges som den anden i et par? (Bank: en anden konto og modsat retning.) */
+function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
+  if (other.id === pick.txId) return false;
+  const src = txs.find((t) => t.id === pick.txId);
+  if (!src) return false;
+  if (pick.mode === 'bank') return other.accountId !== src.accountId && Math.sign(other.amount) === -Math.sign(src.amount);
+  if (pick.mode === 'post') return other.accountId !== pick.postId;
+  return !src.link || other.link !== src.link;
+}
+
+/** Udfør valget: knyt sammen, par på posten (den anden flyttes til samme post) eller par overførslen. */
+function completePick(pick: LinkPick, otherId: string) {
+  const { update, setLinkPick } = useStore.getState();
+  if (pick.mode === 'link') update((d) => linkTxs(d, pick.txId, otherId));
+  else if (pick.mode === 'bank') pairTxs(pick.txId, otherId);
+  else if (pick.postId && pick.periodId) pairOnPost(pick.periodId, pick.postId, pick.txId, otherId);
+  setLinkPick(undefined);
+}
+
 /**
- * "Hører sammen med": knyt transaktioner sammen som en note til dig selv (fx et køb og refusionen).
- * Viser de andre i gruppen og deres sum; klik for at hoppe til en af dem. Kun inden for perioden.
+ * Under transaktionens tekst: "hører sammen med"-gruppen – og knappen til at vælge en anden transaktion.
+ * Overførsler får "Par" i stedet (på en post, der afstemmes, eller med modposten); almindelige indtægter/udgifter "Hører sammen med".
  */
 function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
-  const txs = useStore((s) => s.data.txs);
-  const accounts = useStore((s) => s.data.accounts);
+  const e = useEngine();
+  const txs = e.data.txs;
+  const accounts = e.data.accounts;
   const update = useStore((s) => s.update);
   const showTx = useStore((s) => s.showTx);
   const period = usePeriod();
-  // Kun én ad gangen: den transaktion, man knytter fra, står i store – så man også kan klikke på den anden i listen.
-  const adding = useStore((s) => s.linkPick === tx.id);
+  // Kun én ad gangen: valget står i store – så man også kan klikke på den anden i listen.
+  const pick = useStore((s) => (s.linkPick?.txId === tx.id ? s.linkPick : undefined));
   const setLinkPick = useStore((s) => s.setLinkPick);
-  const setAdding = (on: boolean) => setLinkPick(on ? tx.id : undefined);
   const others = linkedWith(txs, tx);
   const sum = others.reduce((s, t) => s + t.amount, tx.amount);
   const accepted = useStore((s) => (tx.link ? s.data.linkGroups?.[tx.link]?.accepted === sum : false));
   const showTransfers = useStore((s) => s.showTransfers);
   const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '';
-  const options = adding
+  const mode = pickModeFor(e, tx, period);
+  // Søgefeltet åbner ikke af sig selv – dets liste ville ellers ligge hen over rækkerne, man skal kunne klikke på.
+  const start = () => { if (mode) setLinkPick({ txId: tx.id, ...mode }); };
+  const inPeriod = (t: Tx) => !period || (t.date >= period.start && t.date <= period.end);
+  const options = pick
     ? txs
-      .filter((t) => t.id !== tx.id && (!tx.link || t.link !== tx.link) && (!period || (t.date >= period.start && t.date <= period.end)))
-      .sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(tx.date)) - Math.abs(Date.parse(b.date) - Date.parse(tx.date)))
+      .filter((t) => inPeriod(t) && validPick(pick, t, txs))
+      // Samme beløb (modsat retning) først, så nærmeste dato.
+      .sort((a, b) => Number(b.amount === -tx.amount) - Number(a.amount === -tx.amount) || Math.abs(Date.parse(a.date) - Date.parse(tx.date)) - Math.abs(Date.parse(b.date) - Date.parse(tx.date)))
       .slice(0, 400)
-      .map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${t.text} · ${kr2f(t.amount)}`, hint: `· ${accName(t.accountId)}` }))
+      .map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${t.text} · ${kr2f(t.amount)}`, hint: `· ${accName(t.accountId)}${pick.mode === 'post' && !isInternalTo(e, t, pick.postId!) ? ' · flyttes til posten' : ''}` }))
     : [];
+  const postName = pick?.postId ? accName(pick.postId) : mode?.postId ? accName(mode.postId) : '';
+  const btnLabel = mode?.mode === 'post' ? '⇄ Par…' : mode?.mode === 'bank' ? '⇄ Find modpost…' : others.length ? '+ Flere' : '🔗 Hører sammen med…';
+  const btnTitle = mode?.mode === 'post' ? `Par med det, den hører sammen med på ${postName} – fx tilbagebetalingen. Står den anden som noget andet, flyttes den til ${postName}.`
+    : mode?.mode === 'bank' ? 'Find den anden side af overførslen – den sættes til intern overførsel mellem de to konti'
+    : 'Knyt transaktionen til en anden – en note til dig selv om, at de hører sammen';
   return (
     <>
       <TxRelations tx={tx} />
@@ -716,25 +757,28 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
           <button className="tx-link-x" title="Fjern denne transaktion fra gruppen" aria-label="Fjern fra gruppen" onClick={() => update((d) => unlinkTx(d, tx.id))}>Fjern</button>
         </div>
       )}
-      {adding ? (
-        <span className="tx-link-add" onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') setAdding(false); }}>
-          <SearchCombo className="sm" options={options} value={undefined} placeholder="Hører sammen med…" searchPlaceholder="Søg dato, tekst eller beløb…"
-            ariaLabel="Hører sammen med" emptyText="Ingen transaktion matcher – eller klik på den i listen"
-            onChange={(id) => { if (id) { update((d) => linkTxs(d, tx.id, id)); setAdding(false); } }} />
-          <button className="btn sm ghost" onClick={() => setAdding(false)} aria-label="Annullér">✕</button>
+      {pick ? (
+        <span className="tx-link-add" onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') setLinkPick(undefined); }}>
+          <SearchCombo className="sm" options={options} value={undefined}
+            placeholder={pick.mode === 'post' ? `Par med… (${postName})` : pick.mode === 'bank' ? 'Modposten…' : 'Hører sammen med…'}
+            searchPlaceholder="Søg dato, tekst eller beløb…" ariaLabel="Vælg den anden transaktion" emptyText="Ingen transaktion matcher – eller klik på den i listen"
+            onChange={(id) => { if (id) completePick(pick, id); }} />
+          <button className="btn sm ghost" onClick={() => setLinkPick(undefined)} aria-label="Annullér">✕</button>
           <span className="small muted">eller klik på den i listen</span>
         </span>
       ) : (
         <span className="row" style={{ gap: 10 }}>
           {addNote && <button className="add-memo" onClick={addNote}>+ Note</button>}
-          <button className="add-memo" title="Knyt transaktionen til en anden – en note til dig selv om, at de hører sammen" onClick={() => {
-            setAdding(true);
-            setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Hører sammen med"]')?.focus(), 0);
-          }}>{others.length ? '+ Flere' : '🔗 Hører sammen med…'}</button>
+          {mode && <button className={`add-memo ${mode.mode !== 'link' ? 'pair-btn' : ''}`} title={btnTitle} onClick={start}>{btnLabel}</button>}
         </span>
       )}
     </>
   );
+}
+
+/** Er transaktionen allerede "Intern → posten"? */
+function isInternalTo(e: Engine, t: Tx, postId: string) {
+  return !!e.resolved.get(t.id)?.lines.some((l) => l.type === 'internal' && l.targetAccountId === postId);
 }
 
 /**
@@ -869,17 +913,18 @@ export function ResultParts({ parts, categories }: { parts: Map<string, number>;
  * Mens man vælger "hører sammen med": rækkerne i listen kan klikkes for at knytte dem til den valgte transaktion.
  * Bruges på både gennemgangens rækker og den grupperede tabel.
  */
-export function linkTargetProps(pick: string | undefined, txId: string) {
-  if (!pick || pick === txId) return { className: pick === txId ? 'link-source' : '' };
+export function linkTargetProps(pick: LinkPick | undefined, txId: string) {
+  if (!pick || pick.txId === txId) return { className: pick?.txId === txId ? 'link-source' : '' };
+  const txs = useStore.getState().data.txs;
+  const other = txs.find((t) => t.id === txId);
+  if (!other || !validPick(pick, other, txs)) return { className: 'link-disabled' };
   return {
     className: 'link-target',
-    title: 'Klik for at knytte til den valgte transaktion',
+    title: pick.mode === 'link' ? 'Klik for at knytte til den valgte transaktion' : 'Klik for at parre med den valgte transaktion',
     onClickCapture: (ev: React.MouseEvent) => {
       ev.preventDefault();
       ev.stopPropagation();
-      const { update, setLinkPick } = useStore.getState();
-      update((d) => linkTxs(d, pick, txId));
-      setLinkPick(undefined);
+      completePick(pick, txId);
     },
   };
 }
@@ -887,7 +932,8 @@ export function linkTargetProps(pick: string | undefined, txId: string) {
 /** Banner øverst, mens man vælger: hvilken transaktion man knytter fra – og Esc/Annullér. */
 export function LinkPickBanner() {
   const pick = useStore((s) => s.linkPick);
-  const tx = useStore((s) => s.data.txs.find((t) => t.id === s.linkPick));
+  const tx = useStore((s) => s.data.txs.find((t) => t.id === s.linkPick?.txId));
+  const postName = useStore((s) => s.data.accounts.find((a) => a.id === s.linkPick?.postId)?.name);
   const setLinkPick = useStore((s) => s.setLinkPick);
   useEffect(() => {
     if (!pick) return;
@@ -899,7 +945,11 @@ export function LinkPickBanner() {
   if (!pick || !tx) return null;
   return (
     <div className="banner info link-banner">
-      🔗 Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) hører sammen med – eller søg den frem i søgefeltet.
+      <span className="grow">{pick.mode === 'post'
+        ? <>⇄ Klik på det, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med på <b>{postName}</b> – står den som noget andet, flyttes den til {postName}.</>
+        : pick.mode === 'bank'
+          ? <>⇄ Klik på modposten til <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) – på en anden af dine konti.</>
+          : <>🔗 Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) hører sammen med – eller søg den frem i søgefeltet.</>}</span>
       <span className="spacer" />
       <button className="btn sm" onClick={() => setLinkPick(undefined)}>Annullér (Esc)</button>
     </div>

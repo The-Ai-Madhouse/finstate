@@ -625,8 +625,9 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .tx-link .linkish { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .tx-link-x { all: unset; cursor: pointer; color: var(--muted); font-size: 11px; padding: 0 2px; }
 .tx-link-x:hover { color: var(--critical); }
-.tx-link-add { display: inline-flex; gap: 4px; align-items: center; }
-.tx-link-add .combo { min-width: 300px; }
+.tx-link-add { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; max-width: 100%; }
+.tx-link-add > .small { white-space: nowrap; }
+.tx-link-add .combo { min-width: 240px; flex: 1 1 240px; }
 
 /* Sammenfoldelig kortoverskrift */
 .fold-head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -691,3 +692,7 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .xfer-txlink, .xfer-side .linkish, .tx-rel .linkish, .tx-links .linkish, .post-moves .linkish, .xfer-item .linkish { text-decoration: none; }
 .xfer-txlink:hover, .xfer-side .linkish:hover, .tx-rel .linkish:hover, .tx-links .linkish:hover, .post-moves .linkish:hover, .xfer-item .linkish:hover { text-decoration: underline; }
 .xfer-side .linkish { color: var(--ink); }
+
+/* Par-knappen på overførsler skal kunne ses – den er handlingen, ikke en note */
+.tx-notes .add-memo.pair-btn { opacity: 1; color: var(--accent); font-weight: 600; }
+.link-disabled { opacity: 0.45; }

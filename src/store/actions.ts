@@ -1,3 +1,4 @@
+import { pairItems, withSettle } from '../domain/settle';
 import { useMemo } from 'react';
 import { ruleFromTx, splitLines } from '../domain/classify';
 import { buildEngine, type Engine } from '../domain/engine';
@@ -55,6 +56,26 @@ export function pairTxs(aId: string, bId: string) {
         return t;
       }),
     };
+  });
+}
+
+/**
+ * Par to bevægelser på en post (fx et udlæg og tilbagebetalingen til "Jonas skylder mig"):
+ * begge bliver "Intern → posten" (den anden flyttes over, hvis den stod som noget andet),
+ * posten kommer med i periodens afstemning, og de to lægges i samme gruppe.
+ */
+export function pairOnPost(periodId: string, postId: string, aId: string, bId: string) {
+  update((d) => {
+    const toPost = (t: Tx): Tx => {
+      if (t.id !== aId && t.id !== bId) return t;
+      const n: Tx = { ...t, manual: { type: 'internal', targetAccountId: postId } };
+      delete n.splits;
+      return n;
+    };
+    let n: AppData = { ...d, txs: d.txs.map(toPost) };
+    n = withSettle(n, periodId, postId, true);
+    const into = (n.matches ?? []).find((m) => m.accountId === postId && m.keys.includes(`tx:${aId}`) && m.keys.length > 1)?.id;
+    return pairItems(n, postId, [`tx:${aId}`, `tx:${bId}`], into);
   });
 }
 
