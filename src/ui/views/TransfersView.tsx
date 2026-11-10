@@ -1,9 +1,11 @@
+import { clsOfLine } from '../../domain/classify';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { useEffect, useRef, useState } from 'react';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import type { Account, Classification, Period, Tx } from '../../domain/types';
 import { textMatches } from '../../domain/txfilter';
+import { transitName } from '../../domain/ledger';
 import { transferInfo } from '../../domain/transfers';
 import { dayDiff } from '../../domain/util';
 import { pairTxs, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
@@ -29,7 +31,7 @@ type Item =
   /** Modposten ligger i en anden periode: i denne periode er pengene undervejs (eller kom fra forrige periode). */
   | { kind: 'transit'; key: string; t: Tx; partner: Tx; target?: Account }
   | { kind: 'missing'; key: string; t: Tx; target?: Account }
-  | { kind: 'direct'; key: string; t: Tx; target: Account };
+  | { kind: 'direct'; key: string; t: Tx; target?: Account; name: string; transit?: boolean };
 
 /**
  * Interne overførsler som "fra → til": parrede vises som ét par, så man tydeligt ser, hvad der hører sammen.
@@ -59,7 +61,7 @@ function Internal() {
       const [out, inn] = t.amount < 0 ? [t, pair!] : [pair!, t];
       items.push({ kind: 'pair', key: `${out.id}|${inn.id}`, out, inn, manual: t.pairWith === pair!.id });
     } else if (info.kind === 'direct') {
-      items.push({ kind: 'direct', key: t.id, t, target: target! });
+      items.push({ kind: 'direct', key: t.id, t, target, name: info.transitRef ? transitName(data, info.transitRef) : target!.name, transit: !!info.transitRef });
     } else items.push({ kind: 'missing', key: t.id, t, target });
   }
   const count = { missing: 0, paired: 0, transit: 0, direct: 0, all: items.length };
@@ -172,15 +174,15 @@ function Internal() {
                 <div className="xfer-row">
                   {i.kind === 'pair' ? side(i.out) : out ? side(t!)
                     : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `sendt ${dateShort(i.partner.date)} – i forrige periode`)
-                    : expected(i.kind === 'direct' ? i.target.name : i.target?.name, i.kind === 'direct' ? 'direkte' : 'venter på modpost')}
+                    : expected(i.kind === 'direct' ? i.name : i.target?.name, i.kind === 'direct' ? (i.transit ? 'fra forrige periode' : 'direkte') : 'venter på modpost')}
                   <span className="xfer-arrow" aria-hidden>→</span>
                   {i.kind === 'pair' ? side(i.inn) : !out ? side(t!)
                     : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `lander ${dateShort(i.partner.date)} – i næste periode`)
-                    : i.kind === 'direct' ? expected(i.target.name, 'bogføres direkte på posten') : expected(i.target?.name, 'pengene forventes at lande her')}
+                    : i.kind === 'direct' ? expected(i.name, i.transit ? 'trækkes fra pengene undervejs' : 'bogføres direkte på posten') : expected(i.target?.name, 'pengene forventes at lande her')}
                   <span className="num"><Money v={amount} decimals /></span>
                   <span>
                     {i.kind === 'pair' ? <span className="chip user" title={i.manual ? 'Parret af dig' : 'Parret automatisk (samme beløb, tæt på hinanden)'}>⇄ Parret{i.manual ? '' : ' auto'}</span>
-                      : i.kind === 'direct' ? <span className="chip">Direkte</span>
+                      : i.kind === 'direct' ? <span className="chip" title={i.transit ? 'Bogført mod penge undervejs fra forrige periode' : undefined}>{i.transit ? 'Fra undervejs' : 'Direkte'}</span>
                       : i.kind === 'transit' ? <span className="chip" title="Modposten ligger i en anden periode – i denne periode står beløbet som penge undervejs">{out ? 'Undervejs' : 'Fra forrige periode'}</span>
                       : <span className="chip review">Mangler modpost</span>}
                     {i.kind === 'pair' && Math.abs(dayDiff(i.out.date, i.inn.date)) > 0 && <span className="small muted"> {Math.abs(dayDiff(i.out.date, i.inn.date))} dage</span>}
@@ -236,7 +238,7 @@ function PairPicker({ t, period }: { t: Tx; period: Period }) {
 function TxEdit({ t }: { t: Tx }) {
   const e = useEngine();
   const r = e.resolved.get(t.id)!;
-  const [cls, setCls] = useState<Classification>(() => { const l = r.lines[0]; return { type: l.type, categoryId: l.categoryId, targetAccountId: l.targetAccountId, counterparty: l.counterparty }; });
+  const [cls, setCls] = useState<Classification>(() => clsOfLine(r.lines[0]));
   const acc = e.data.accounts.find((a) => a.id === t.accountId)?.name;
   return (
     <div className="xfer-edit-line">

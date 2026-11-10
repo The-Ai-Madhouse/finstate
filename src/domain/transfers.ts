@@ -10,6 +10,8 @@ export interface TransferInfo {
   partner?: Tx;
   /** Den post, pengene flytter til/fra. */
   target?: Account;
+  /** Bogført mod penge undervejs fra en tidligere periode. */
+  transitRef?: string;
 }
 
 export const TRANSFER_LABEL: Record<TransferKind, string> = {
@@ -23,6 +25,7 @@ export function transferInfo(data: AppData, resolved: Map<string, Resolved>, txB
   const r = resolved.get(tx.id);
   const line = r?.lines.find((l) => l.type === 'internal');
   if (!r || !line) return undefined;
+  if (line.transitRef) return { kind: 'direct', transitRef: line.transitRef };
   const target = data.accounts.find((a) => a.id === line.targetAccountId);
   const partner = r.pairId ? txById.get(r.pairId) : undefined;
   if (partner) return { kind: partner.date >= period.start && partner.date <= period.end ? 'pair' : 'transit', partner, target };

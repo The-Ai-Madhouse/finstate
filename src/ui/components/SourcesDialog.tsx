@@ -260,5 +260,6 @@ export function XferChip({ info }: { info: TransferInfo }) {
     : info.kind === 'transit' ? `Modposten (${dateShort(info.partner!.date)}) ligger i en anden periode – pengene er undervejs`
     : info.kind === 'direct' ? `Bogført direkte på ${info.target?.name ?? 'posten'} – kun én side, intet at parre`
     : 'Den anden side af overførslen er ikke fundet';
+  if (info.transitRef) return <span className="chip" title="Bogført mod penge undervejs fra forrige periode">Fra undervejs</span>;
   return <span className={`chip ${cls}`} title={tip}>{info.kind === 'pair' ? '⇄ ' : ''}{TRANSFER_LABEL[info.kind]}</span>;
 }

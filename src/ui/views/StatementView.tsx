@@ -16,7 +16,7 @@ import { download, useEngine, usePeriod } from '../../store/actions';
 import { useData, useStore } from '../../store/store';
 import { BarCompare } from '../components/charts';
 import { SourcesDialog } from '../components/SourcesDialog';
-import { AmountInput, Money, ResultParts, SearchCombo } from '../components/common';
+import { AmountInput, internalTargetName, Money, ResultParts, SearchCombo } from '../components/common';
 
 export function StatementView() {
   const e = useEngine();
@@ -41,7 +41,7 @@ export function StatementView() {
         const top = cat ? ancestors(data.categories, cat.id)[0] : undefined;
         rows.push([
           t.date, data.accounts.find((a) => a.id === t.accountId)?.name ?? '', t.text, kr2f(l.amount), t.balance !== undefined ? kr2f(t.balance) : '',
-          TX_TYPE_LABEL[l.type], cat?.name ?? '', top?.name ?? '', l.counterparty ?? data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? '', r.source, t.note ?? '', t.memo ?? '',
+          TX_TYPE_LABEL[l.type], cat?.name ?? '', top?.name ?? '', l.counterparty ?? internalTargetName(data.accounts, l) ?? '', r.source, t.note ?? '', t.memo ?? '',
         ]);
       }
     }

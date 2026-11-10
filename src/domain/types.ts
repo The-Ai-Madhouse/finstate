@@ -65,6 +65,8 @@ export interface Classification {
   counterparty?: string;
   /** Intern: modtagerkonto (valgfri; værdikonti bogføres direkte). */
   targetAccountId?: string;
+  /** Intern: pengene kommer fra (eller er) penge undervejs fra en tidligere periode – fx "transit:<konto>" eller "transit". */
+  transitRef?: string;
 }
 
 export interface Split extends Classification {

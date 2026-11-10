@@ -6,11 +6,12 @@ import { kr, kr2f, parseAmount } from '../../domain/format';
 import { type Account, type Category, type Classification, type Tx, type TxType } from '../../domain/types';
 import { newCategoryId } from '../../domain/defaults';
 import { useData, useStore, type View } from '../../store/store';
-import { setMemo, usePeriod } from '../../store/actions';
+import { setMemo, useEngine, usePeriod } from '../../store/actions';
+import { balancesAt, isTransitRef, transitName } from '../../domain/ledger';
 import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
 import { dateShort } from '../../domain/format';
 import { KIND_LABEL, NO_TYPE, addAccountType, noteFor, suggestCategory, withAccountInPeriods } from '../../domain/accountTypes';
-import { uid } from '../../domain/util';
+import { addDays, uid } from '../../domain/util';
 
 /**
  * Beløb. decimals: "1.234,56" (tabeller med transaktioner). precise: "1.234,56 kr" (saldi i balancen).
@@ -343,8 +344,8 @@ export function ClassEditor({ value, onChange, accountId, amount, compact, txId,
             onTypeKey={(key, q) => switchType(TYPE_KEYS[key], q)} />
         )}
         {value.type === 'internal' && (
-          <TargetSelect key={`t${carry.n}`} initialQuery={carry.q} onQueryChange={onQ} className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.targetAccountId} onChange={(targetAccountId) => onChange({ ...value, targetAccountId })}
-            onCommit={onCommit && ((targetAccountId) => onCommit({ ...value, targetAccountId }))}
+          <TargetSelect key={`t${carry.n}`} txId={txId} initialQuery={carry.q} onQueryChange={onQ} className={`grow ${sm}`} exclude={accountId} amount={amount} value={value.transitRef ?? value.targetAccountId} onChange={(id) => onChange(internalTo(id))}
+            onCommit={onCommit && ((id) => onCommit(internalTo(id)))}
             onTypeKey={(key, q) => switchType(TYPE_KEYS[key], q)} />
         )}
       </div>
@@ -398,8 +399,10 @@ export function KindSelect({ value, onChange, className }: { value: 'tracked' | 
 }
 
 /** Post på balancen (alle poster i én søgbar liste) – med mulighed for at oprette en ny post på stedet. */
-function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className, amount, initialQuery, onQueryChange }: {
+function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className, amount, initialQuery, onQueryChange, txId }: {
   value?: string;
+  /** Transaktionen, der vælges for – dens egne posteringer tæller ikke med i "tilbage". */
+  txId?: string;
   onChange: (id?: string) => void;
   onCommit?: (id: string) => void;
   onTypeKey?: (key: string, q: string) => void;
@@ -417,6 +420,19 @@ function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className
   const [typeId, setTypeId] = useState<string | undefined>();
   const [kind, setKind] = useState<'tracked' | 'valuation'>('tracked');
   const inputRef = useRef<HTMLInputElement>(null);
+  const e = useEngine();
+  const period = usePeriod();
+  // Det, der stod undervejs ved periodens start, minus det, periodens andre transaktioner allerede har hentet.
+  const transitAtStart = useMemo(() => {
+    if (!period) return [];
+    const date = addDays(period.start, -1);
+    return [...balancesAt(e.ledger, date).entries()]
+      .filter(([ref, v]) => isTransitRef(ref) && v !== 0)
+      .map(([ref, primo]) => {
+        const used = e.ledger.postings.filter((p) => p.ref === ref && p.date >= period.start && p.date <= period.end && p.txId !== txId).reduce((s, p) => s + p.amount, 0);
+        return { ref, amount: primo + used, date };
+      });
+  }, [e, period, txId]);
   if (creating) {
     const create = () => {
       if (!name.trim()) return;
@@ -441,9 +457,16 @@ function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className
     );
   }
   const typeOf = (a: Account) => accountTypes.find((t) => t.id === a.typeId)?.name;
-  const options = accounts
-    .filter((a) => a.id !== exclude && (!a.archived || a.id === value))
-    .map((a) => ({ id: a.id, label: a.name, hint: typeOf(a) ? `· ${typeOf(a)}` : undefined }));
+  // Penge undervejs fra forrige periode (samme retning som beløbet) – fx en overførsel, der blev sendt før nytår og først lander nu.
+  const transitOpts: ComboOption[] = transitAtStart
+    .filter((x) => x.ref === value || (x.amount !== 0 && Math.sign(x.amount) === Math.sign(amount)))
+    .map((x) => ({ id: x.ref, label: `${transitName({ accounts }, x.ref)} – fra forrige periode`, hint: `· ${kr(Math.abs(x.amount))} tilbage`, group: 'Penge undervejs fra forrige periode' }));
+  const options: ComboOption[] = [
+    ...transitOpts,
+    ...accounts
+      .filter((a) => a.id !== exclude && (!a.archived || a.id === value))
+      .map((a) => ({ id: a.id, label: a.name, hint: typeOf(a) ? `· ${typeOf(a)}` : undefined, group: transitOpts.length ? 'Poster' : undefined })),
+  ];
   return (
     <SearchCombo className={className} options={options} value={value} onChange={onChange} onCommit={onCommit} onTypeKey={onTypeKey} inputRef={inputRef}
       initialQuery={initialQuery} onQueryChange={onQueryChange}
@@ -453,9 +476,22 @@ function TargetSelect({ value, onChange, onCommit, onTypeKey, exclude, className
   );
 }
 
+/** Intern overførsel til/fra en post – eller fra penge undervejs ("transit…"). */
+const internalTo = (id?: string): Classification =>
+  id && isTransitRef(id) ? { type: 'internal', transitRef: id } : { type: 'internal', targetAccountId: id };
+
+/** Navnet på det, en intern linje flytter til/fra: posten – eller penge undervejs. */
+export function internalTargetName(accounts: Account[], l: Pick<Classification, 'targetAccountId' | 'transitRef'>): string | undefined {
+  if (l.transitRef) return transitName({ accounts }, l.transitRef);
+  return accounts.find((a) => a.id === l.targetAccountId)?.name;
+}
+
 /** Én sætning om, hvad valget betyder for regnskabet – især for udlæg/gæld. */
 function ClassHint({ value, amount }: { value: Classification; amount: number; txId?: string }) {
   const { categories, accounts } = useData();
+  if (value.type === 'internal' && value.transitRef) {
+    return <div className="class-hint">Pengene {amount < 0 ? 'går til' : 'kommer fra'} <b>{transitName({ accounts }, value.transitRef).replace(/^Undervejs/, 'penge undervejs')}</b> fra forrige periode – beløbet trækkes fra det, der stod undervejs. Hverken indtægt eller udgift.</div>;
+  }
   if (value.type === 'internal' || value.type === 'outlay') {
     const t = accounts.find((a) => a.id === value.targetAccountId);
     const dir = amount < 0 ? 'til' : 'fra';
@@ -694,7 +730,7 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
 }
 
 /** Er klassifikationen komplet? Intern kræver en valgt post; indtægt/udgift kræver en kategori. */
-export const isComplete = (c: Classification) => (c.type === 'internal' ? !!c.targetAccountId : c.type === 'outlay' || !!c.categoryId);
+export const isComplete = (c: Classification) => (c.type === 'internal' ? !!(c.targetAccountId || c.transitRef) : c.type === 'outlay' || !!c.categoryId);
 
 /** Kommentar på en aktiv/passiv – vises under navnet, rettes ved klik, "+ Kommentar" ved hover. */
 export function AccountNote({ account }: { account: Account }) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Resolved } from '../../domain/classify';
+import { clsOfLine, type Resolved } from '../../domain/classify';
 import { kr } from '../../domain/format';
 import type { Classification, Split, Tx } from '../../domain/types';
 import { saveSplitRule, setManual, setSplits } from '../../store/actions';
@@ -7,7 +7,7 @@ import { useStore } from '../../store/store';
 import { AmountInput, ClassEditor, Money, isComplete } from './common';
 
 interface Part { cls: Classification; amt: number }
-const clsOf = (l: Split): Classification => ({ type: l.type, categoryId: l.categoryId, counterparty: l.counterparty, targetAccountId: l.targetAccountId });
+const clsOf = (l: Split): Classification => clsOfLine(l);
 
 /**
  * Opdel én transaktion i flere dele – fx en udbetaling, der både er indtægt og en

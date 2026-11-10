@@ -1,6 +1,6 @@
 import { NoPeriod } from '../components/PeriodPrompt';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NEEDS_REVIEW, type Resolved } from '../../domain/classify';
+import { NEEDS_REVIEW, clsOfLine, type Resolved } from '../../domain/classify';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
@@ -12,12 +12,9 @@ import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
 import { saveRule, setManual, useEngine, usePeriod } from '../../store/actions';
-import { AccountSelect, CategoryCombo, LinkPickBanner, linkTargetProps, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
+import { AccountSelect, CategoryCombo, internalTargetName, LinkPickBanner, linkTargetProps, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
 
-const clsOf = (r: Resolved): Classification => {
-  const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
-  return { type, categoryId, counterparty, targetAccountId };
-};
+const clsOf = (r: Resolved): Classification => clsOfLine(r.lines[0]);
 
 /** Kategorisering hører til et financial statement – uden periode vises startkortet. */
 export function LedgerView() {
@@ -308,7 +305,7 @@ function TxTable({ txs }: { txs: Tx[] }) {
                   <td className="num"><Money v={t.amount} decimals colored /></td>
                   <td>
                     {r.lines.length > 1 ? (
-                      <span className="small">{r.lines.length} dele{r.source === 'rule' ? ' (husket)' : ''}: {r.lines.map((l) => `${kr(Math.abs(l.amount))} ${l.type === 'outlay' ? `udlæg ${l.counterparty}` : l.type === 'internal' ? `→ ${e.data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? 'intern'}` : categoryLabel(e.data.categories, l.categoryId) || l.type}`).join(' · ')}</span>
+                      <span className="small">{r.lines.length} dele{r.source === 'rule' ? ' (husket)' : ''}: {r.lines.map((l) => `${kr(Math.abs(l.amount))} ${l.type === 'outlay' ? `udlæg ${l.counterparty}` : l.type === 'internal' ? `→ ${internalTargetName(e.data.accounts, l) ?? 'intern'}` : categoryLabel(e.data.categories, l.categoryId) || l.type}`).join(' · ')}</span>
                     ) : (
                       <ClassEditor value={clsOf(r)} amount={t.amount} accountId={t.accountId} txId={t.id} compact onChange={(c) => setManual([t.id], c)} />
                     )}

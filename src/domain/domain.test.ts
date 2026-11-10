@@ -781,3 +781,21 @@ describe('hører sammen', () => {
     expect(s1.result).toBe(s0.result);
   });
 });
+
+describe('indbetaling fra penge undervejs', () => {
+  it('books an incoming payment against money in transit from an earlier period – not as income, not paired', async () => {
+    const { transferInfo } = await import('./transfers');
+    const d0 = demoData();
+    // 1.500 kr var undervejs ved bogføringsstart (ukendt modtager) og lander som en indbetaling i januar.
+    const inn = d0.txs.find((t) => t.amount > 0 && t.date >= '2025-01-01' && t.text.startsWith('Faktura'))!;
+    const d = { ...d0, settings: { ...d0.settings, openingTransit: inn.amount }, txs: d0.txs.map((t) => (t.id === inn.id ? { ...t, manual: { type: 'internal' as const, transitRef: 'transit' } } : t)) };
+    const e = buildEngine(d);
+    const s = e.statement(d.periods[0]);
+    expect(s.rows.find((r) => r.ref === 'transit')).toMatchObject({ open: inn.amount, close: 0 });
+    const before = buildEngine({ ...d0, settings: { ...d0.settings, openingTransit: inn.amount } }).statement(d0.periods[0]);
+    expect(before.result - s.result).toBe(inn.amount); // ikke længere en indtægt
+    expect(s.equityClose - s.equityOpen).toBe(s.result + s.openingInPeriod);
+    expect(e.resolved.get(inn.id)!.pairId).toBeUndefined();
+    expect(transferInfo(d, e.resolved, e.txById, inn, d.periods[0])).toMatchObject({ kind: 'direct', transitRef: 'transit' });
+  });
+});

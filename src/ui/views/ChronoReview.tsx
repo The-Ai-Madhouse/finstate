@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NEEDS_REVIEW, type Resolved } from '../../domain/classify';
+import { NEEDS_REVIEW, clsOfLine, type Resolved } from '../../domain/classify';
 import { dateShort } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
@@ -7,14 +7,11 @@ import { setManual, useEngine, usePeriod } from '../../store/actions';
 import { inPeriod } from '../../domain/engine';
 import { SimilarDialog } from '../components/SimilarDialog';
 import { SplitDialog } from '../components/SplitDialog';
-import { ClassEditor, Empty, Money, linkTargetProps, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
+import { ClassEditor, Empty, internalTargetName, Money, linkTargetProps, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
 import { Confetti } from '../components/Confetti';
 import { useStore } from '../../store/store';
 
-const clsOf = (r: Resolved): Classification => {
-  const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
-  return { type, categoryId, counterparty, targetAccountId };
-};
+const clsOf = (r: Resolved): Classification => clsOfLine(r.lines[0]);
 const similarKey = (t: Tx) => `${normalizeText(t.text) || t.text}|${t.amount > 0 ? 'in' : 'out'}`;
 
 /** Ligger den første ubehandlede række over, under eller inden for skærmen? */
@@ -296,7 +293,7 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
       ) : (
         <div className="small row" style={{ gap: 6 }}>
           <SourceChip source={r.source} />
-          <span>{r.lines.map((l) => (l.type === 'outlay' ? `Udlæg · ${l.counterparty}` : l.type === 'internal' ? `Intern${l.targetAccountId ? ` → ${e.data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? ''}` : ''}` : categoryLabel(e.data.categories, l.categoryId) || 'ukategoriseret')).join(' + ')}</span>
+          <span>{r.lines.map((l) => (l.type === 'outlay' ? `Udlæg · ${l.counterparty}` : l.type === 'internal' ? `Intern${internalTargetName(e.data.accounts, l) ? ` → ${internalTargetName(e.data.accounts, l)}` : ''}` : categoryLabel(e.data.categories, l.categoryId) || 'ukategoriseret')).join(' + ')}</span>
           {r.source === 'rule' && ruleOrigin && <span className="muted">· som {dateShort(ruleOrigin.date)}</span>}
         </div>
       )}
@@ -341,7 +338,7 @@ function SplitBreakdown({ r, total, source, onEdit, onReplace }: { r: Resolved; 
   const e = useEngine();
   const whole = r.lines.reduce((s, l) => s + Math.abs(l.amount), 0) || 1;
   const what = (l: Resolved['lines'][number]) =>
-    l.type === 'internal' ? `→ ${e.data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? 'vælg post'}`
+    l.type === 'internal' ? `→ ${internalTargetName(e.data.accounts, l) ?? 'vælg post'}`
       : l.type === 'outlay' ? l.counterparty ?? ''
       : categoryLabel(e.data.categories, l.categoryId) || 'ukategoriseret';
   const sum = r.lines.reduce((s, l) => s + l.amount, 0);

@@ -36,6 +36,12 @@ export interface Resolved {
   pairId?: string;
 }
 
+/** Klassifikationen for én linje (uden beløb). */
+export const clsOfLine = (l: Split): Classification => {
+  const { type, categoryId, counterparty, targetAccountId, transitRef } = l;
+  return { type, categoryId, counterparty, targetAccountId, ...(transitRef ? { transitRef } : {}) };
+};
+
 export function sortRules(rules: Rule[]): Rule[] {
   return [...rules].sort((a, b) =>
     a.match !== b.match ? (a.match === 'exact' ? -1 : 1) : b.pattern.length - a.pattern.length,
@@ -159,7 +165,8 @@ export function resolveAll(data: Pick<AppData, 'rules' | 'accounts' | 'bankMap' 
   const cands = data.txs.filter((tx) => {
     if (explicit.has(tx.id) || tx.noAutoPair) return false;
     const r = s1.get(tx.id);
-    if (r) return r.lines.length === 1 && r.lines[0].type === 'internal' && !isValuationTarget(r);
+    // Bogført mod penge undervejs fra en tidligere periode: skal ikke parres med noget.
+    if (r) return r.lines.length === 1 && r.lines[0].type === 'internal' && !r.lines[0].transitRef && !isValuationTarget(r);
     // Uafklarede transaktioner foreslås kun som interne, hvis beløbsmatch er slået til.
     return ctx.autoPair !== false && !isMobilePay(tx.text) && TRANSFERISH.test(tx.text);
   });

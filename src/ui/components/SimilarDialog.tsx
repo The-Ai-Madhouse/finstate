@@ -1,17 +1,14 @@
 import { useEffect, useState } from 'react';
-import { NEEDS_REVIEW, splitLines, type Resolved } from '../../domain/classify';
+import { NEEDS_REVIEW, clsOfLine, splitLines, type Resolved } from '../../domain/classify';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
 import { applySplitTo, saveRule, saveSplitRule, setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { AmountInput, ClassEditor, Money, SourceChip, TxNotes, categoryLabel, isComplete, InfoBox } from './common';
+import { AmountInput, ClassEditor, internalTargetName, Money, SourceChip, TxNotes, categoryLabel, isComplete, InfoBox } from './common';
 
-const clsOf = (r: Resolved): Classification => {
-  const { type, categoryId, counterparty, targetAccountId } = r.lines[0];
-  return { type, categoryId, counterparty, targetAccountId };
-};
+const clsOf = (r: Resolved): Classification => clsOfLine(r.lines[0]);
 
 /**
  * "Lignende transaktioner": se alle med samme tekst, vælg til/fra, vælg hvad de skal være –
@@ -54,7 +51,7 @@ export function SimilarDialog({ tx, similar, initial, onClose, onApplied }: {
   const pattern = normalizeText(tx.text);
   const acc = (id: string) => data.accounts.find((a) => a.id === id)?.name ?? '';
   const lineLabel = (l: { type: string; categoryId?: string; targetAccountId?: string }) =>
-    l.type === 'internal' ? `Intern → ${data.accounts.find((a) => a.id === l.targetAccountId)?.name ?? '?'}` : categoryLabel(data.categories, l.categoryId) || 'ingen kategori';
+    l.type === 'internal' ? `Intern → ${internalTargetName(data.accounts, l) ?? '?'}` : categoryLabel(data.categories, l.categoryId) || 'ingen kategori';
   const describe = (r: Resolved) => (r.lines.length > 1 ? r.lines.map((l) => `${lineLabel(l)} ${kr(Math.abs(l.amount))}`).join(' + ') : lineLabel(r.lines[0]));
 
   useEffect(() => {

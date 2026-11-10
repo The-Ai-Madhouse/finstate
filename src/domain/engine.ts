@@ -108,7 +108,7 @@ export function periodChecks(e: Engine, p: Period): Check[] {
   const internalUnpaired = txs.filter((t) => {
     const r = resolved.get(t.id)!;
     if (r.pairId) return false;
-    return r.lines.some((l) => l.type === 'internal' && !(l.targetAccountId && (data.accounts.find((a) => a.id === l.targetAccountId)?.kind ?? 'bank') !== 'bank'));
+    return r.lines.some((l) => l.type === 'internal' && !l.transitRef && !(l.targetAccountId && (data.accounts.find((a) => a.id === l.targetAccountId)?.kind ?? 'bank') !== 'bank'));
   });
   const transit = st.rows.filter((r) => r.kind === 'transit').reduce((s, r) => s + r.close, 0);
   if (internalUnpaired.length) {

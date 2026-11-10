@@ -85,6 +85,8 @@ export function buildLedger(data: AppData, resolved: Map<string, Resolved>): Led
           pl(tx.date, line.categoryId ? `cat:${line.categoryId}` : `uncat:${line.type}`, line.amount, x);
           break;
         case 'internal': {
+          // Valgt som penge undervejs fra en tidligere periode: bogføres direkte mod den.
+          if (line.transitRef) { pl(tx.date, line.transitRef, -line.amount, x); break; }
           const target = line.targetAccountId ? accounts.get(line.targetAccountId) : undefined;
           const direct = target && (target.kind !== 'bank' || !txByAcc.has(target.id));
           // Undervejs pr. modtager: penge ud venter på målkontoen; penge ind er landet på denne konto.
@@ -205,11 +207,14 @@ export interface Statement {
   uncategorized: { income: number; expense: number };
 }
 
+/** "Undervejs til Fælles opsparing" / "Penge undervejs (ukendt modtager)". */
+export function transitName(data: Pick<AppData, 'accounts'>, ref: string): string {
+  const id = transitAccountId(ref);
+  return id ? `Undervejs til ${data.accounts.find((a) => a.id === id)?.name ?? 'slettet konto'}` : 'Penge undervejs (ukendt modtager)';
+}
+
 export function statement(data: AppData, ledger: Ledger, period: Period): Statement {
-  const transitLabel = (ref: string) => {
-    const id = transitAccountId(ref);
-    return id ? `Undervejs til ${data.accounts.find((a) => a.id === id)?.name ?? 'slettet konto'}` : 'Penge undervejs (ukendt modtager)';
-  };
+  const transitLabel = (ref: string) => transitName(data, ref);
   const before = balancesAt(ledger, addDays(period.start, -1));
   const after = balancesAt(ledger, period.end);
   const accounts = new Map(data.accounts.map((a) => [a.id, a]));
