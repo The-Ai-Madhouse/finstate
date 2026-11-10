@@ -761,3 +761,23 @@ describe('afstemning holder sig til perioden', () => {
     expect(settleState(cross, e3.ledger, 'acc-jonas', y26).groups).toEqual([]);
   });
 });
+
+describe('hører sammen', () => {
+  it('links, merges and unlinks transactions without touching the accounts', async () => {
+    const { linkTxs, unlinkTx, linkedWith } = await import('./links');
+    const d = demoData();
+    const [a, b, c, x] = d.txs;
+    let n = linkTxs(d, a.id, b.id);
+    n = linkTxs(n, c.id, x.id);
+    n = linkTxs(n, b.id, c.id); // to grupper lægges sammen
+    const get = (id: string) => n.txs.find((t) => t.id === id)!;
+    expect(linkedWith(n.txs, get(a.id)).map((t) => t.id).sort()).toEqual([b.id, c.id, x.id].sort());
+    n = unlinkTx(n, a.id);
+    expect(get(a.id).link).toBeUndefined();
+    expect(linkedWith(n.txs, get(b.id))).toHaveLength(2);
+    const two = unlinkTx(unlinkTx(n, b.id), c.id); // kun x tilbage → gruppen opløses
+    expect(two.txs.find((t) => t.id === x.id)!.link).toBeUndefined();
+    const s0 = buildEngine(d).statement(d.periods[0]), s1 = buildEngine(n).statement(n.periods[0]);
+    expect(s1.result).toBe(s0.result);
+  });
+});

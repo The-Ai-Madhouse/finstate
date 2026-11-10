@@ -1,3 +1,4 @@
+import { TRANSFER_LABEL, transferInfo, type TransferInfo } from '../../domain/transfers';
 import { useEffect } from 'react';
 import { addDays } from '../../domain/util';
 import { dateShort, kr } from '../../domain/format';
@@ -169,7 +170,8 @@ export function BalanceSourcesDialog({ refKey, label, side, period, view = 'peri
     if (p.txId) {
       const t = e.txById.get(p.txId);
       const from = t && t.accountId !== ownAccountId ? acc(t.accountId)?.name : undefined;
-      return { text: t?.text ?? 'Transaktion', where: from ? `${p.amount * sign > 0 ? 'fra' : 'til'} ${from}` : '', txId: p.txId, note: t?.memo };
+      const xfer = t ? transferInfo(data, e.resolved, e.txById, t, period) : undefined;
+      return { text: t?.text ?? 'Transaktion', where: from ? `${p.amount * sign > 0 ? 'fra' : 'til'} ${from}` : '', txId: p.txId, note: t?.memo, xfer };
     }
     if (p.openItemId) {
       const o = data.openItems.find((x) => x.id === p.openItemId);
@@ -208,7 +210,7 @@ export function BalanceSourcesDialog({ refKey, label, side, period, view = 'peri
           {!src.moves.length ? <p className="muted small">{view === 'primo' ? 'Ingen posteringer før perioden – primo er 0.' : 'Ingen bevægelser i perioden.'}</p> : (
             <div className="modal-scroll">
               <table>
-                <thead><tr><th>Dato</th><th>Tekst</th><th>Fra/til</th><th className="num">Beløb</th><th /></tr></thead>
+                <thead><tr><th>Dato</th><th>Tekst</th><th>Fra/til</th><th>Overførsel</th><th className="num">Beløb</th><th /></tr></thead>
                 <tbody>
                   {[...src.moves].sort((a, b) => (a.date < b.date ? -1 : 1)).map((p, i) => {
                     const d = describe(p);
@@ -217,8 +219,12 @@ export function BalanceSourcesDialog({ refKey, label, side, period, view = 'peri
                         <td className="small">{dateShort(p.date)}</td>
                         <td className="ellipsis" style={{ maxWidth: 340 }} title={d.text}>{d.text}{d.note && <div className="small muted ellipsis">✎ {d.note}</div>}</td>
                         <td className="small muted">{d.where}</td>
+                        <td className="small">{'xfer' in d && d.xfer && <XferChip info={d.xfer} />}</td>
                         <td className="num"><Money precise signed colored v={sign * p.amount} /></td>
-                        <td className="num">{d.txId && <button className="btn sm ghost" onClick={() => { onClose(); showTx(d.txId!); }}>Vis →</button>}</td>
+                        <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                          {'xfer' in d && d.xfer && <button className="btn sm ghost" title="Se overførslen på Overførsler-siden – par, ophæv eller ret" onClick={() => { onClose(); useStore.getState().showTransfers({ txId: d.txId }); }}>Overførsler →</button>}
+                          {d.txId && <button className="btn sm ghost" title="Åbn i Kategorisér" onClick={() => { onClose(); showTx(d.txId!); }}>Vis →</button>}
+                        </td>
                       </tr>
                     );
                   })}
@@ -227,6 +233,14 @@ export function BalanceSourcesDialog({ refKey, label, side, period, view = 'peri
             </div>
           )}
         </section>
+
+        {view === 'period' && ownAccountId && src.moves.some((p) => { const d = describe(p); return 'xfer' in d && !!d.xfer; }) && (
+          <div className="row small" style={{ marginTop: 8 }}>
+            <span className="ink2">Interne overførsler på {label} kan parres, ophæves og rettes samlet på Overførsler-siden.</span>
+            <span className="spacer" />
+            <button className="btn sm" onClick={() => { onClose(); useStore.getState().showTransfers({ accountId: ownAccountId }); }}>Alle overførsler for {label} →</button>
+          </div>
+        )}
 
         <div className="row" style={{ marginTop: 12, borderTop: '1.5px solid var(--ink)', paddingTop: 10 }}>
           <b>{view === 'primo' ? 'Primo' : 'Ultimo'}</b>
@@ -237,4 +251,14 @@ export function BalanceSourcesDialog({ refKey, label, side, period, view = 'peri
       </div>
     </div>
   );
+}
+
+/** Status for en intern overførsel – samme farver og ord som på Overførsler-siden. */
+export function XferChip({ info }: { info: TransferInfo }) {
+  const cls = info.kind === 'pair' ? 'user' : info.kind === 'missing' ? 'review' : '';
+  const tip = info.kind === 'pair' ? `Parret med ${dateShort(info.partner!.date)} "${info.partner!.text}"`
+    : info.kind === 'transit' ? `Modposten (${dateShort(info.partner!.date)}) ligger i en anden periode – pengene er undervejs`
+    : info.kind === 'direct' ? `Bogført direkte på ${info.target?.name ?? 'posten'} – kun én side, intet at parre`
+    : 'Den anden side af overførslen er ikke fundet';
+  return <span className={`chip ${cls}`} title={tip}>{info.kind === 'pair' ? '⇄ ' : ''}{TRANSFER_LABEL[info.kind]}</span>;
 }

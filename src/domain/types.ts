@@ -96,6 +96,8 @@ export interface Tx {
   pairWith?: string;
   /** Brugeren har ophævet en automatisk parring – transaktionen parres ikke automatisk igen. */
   noAutoPair?: boolean;
+  /** "Hører sammen": transaktioner med samme værdi er knyttet sammen af brugeren (kun en note – ændrer ikke regnskabet). */
+  link?: string;
 }
 
 /** En importeret fil: hvilke transaktioner den indeholdt (også dem, der fandtes i forvejen). */

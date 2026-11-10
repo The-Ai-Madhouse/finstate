@@ -6,7 +6,9 @@ import { kr, kr2f, parseAmount } from '../../domain/format';
 import { type Account, type Category, type Classification, type Tx, type TxType } from '../../domain/types';
 import { newCategoryId } from '../../domain/defaults';
 import { useData, useStore, type View } from '../../store/store';
-import { setMemo } from '../../store/actions';
+import { setMemo, usePeriod } from '../../store/actions';
+import { linkTxs, linkedWith, unlinkTx } from '../../domain/links';
+import { dateShort } from '../../domain/format';
 import { KIND_LABEL, NO_TYPE, addAccountType, noteFor, suggestCategory, withAccountInPeriods } from '../../domain/accountTypes';
 import { uid } from '../../domain/util';
 
@@ -624,10 +626,66 @@ export function TxNotes({ tx }: { tx: Tx }) {
         />
       ) : tx.memo ? (
         <button className="memo" title="Din note – klik for at rette" onClick={() => { setTxt(tx.memo ?? ''); setEditing(true); }}>✎ {tx.memo}</button>
-      ) : (
-        <button className="add-memo" onClick={() => { setTxt(''); setEditing(true); }}>+ Note</button>
-      )}
+      ) : null}
+      <TxLinks tx={tx} addNote={!editing && !tx.memo ? () => { setTxt(''); setEditing(true); } : undefined} />
     </div>
+  );
+}
+
+/**
+ * "Hører sammen med": knyt transaktioner sammen som en note til dig selv (fx et køb og refusionen).
+ * Viser de andre i gruppen og deres sum; klik for at hoppe til en af dem. Kun inden for perioden.
+ */
+function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
+  const txs = useStore((s) => s.data.txs);
+  const accounts = useStore((s) => s.data.accounts);
+  const update = useStore((s) => s.update);
+  const showTx = useStore((s) => s.showTx);
+  const period = usePeriod();
+  const [adding, setAdding] = useState(false);
+  const others = linkedWith(txs, tx);
+  const sum = others.reduce((s, t) => s + t.amount, tx.amount);
+  const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '';
+  const options = adding
+    ? txs
+      .filter((t) => t.id !== tx.id && (!tx.link || t.link !== tx.link) && (!period || (t.date >= period.start && t.date <= period.end)))
+      .sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(tx.date)) - Math.abs(Date.parse(b.date) - Date.parse(tx.date)))
+      .slice(0, 400)
+      .map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${t.text} · ${kr2f(t.amount)}`, hint: `· ${accName(t.accountId)}` }))
+    : [];
+  return (
+    <>
+      {others.length > 0 && (
+        <div className="tx-links" onKeyDown={(ev) => ev.stopPropagation()}>
+          <span className="tx-links-label" title="Din egen note om, at transaktionerne hører sammen – ændrer ikke regnskabet">🔗 Hører sammen med</span>
+          {others.map((o) => (
+            <span key={o.id} className="tx-link">
+              <button className="linkish" title="Vis transaktionen" onClick={() => showTx(o.id)}>{dateShort(o.date)} {o.text}</button>
+              <span className="num small">{kr2f(o.amount)}</span>
+              {others.length > 1 && <button className="tx-link-x" title="Tag ud af gruppen" aria-label={`Tag ${o.text} ud af gruppen`} onClick={() => update((d) => unlinkTx(d, o.id))}>✕</button>}
+            </span>
+          ))}
+          <span className="small muted">i alt <span className={sum === 0 ? 'pos' : ''}>{kr2f(sum)}{sum === 0 ? ' ✓' : ''}</span></span>
+          <button className="tx-link-x" title="Fjern denne transaktion fra gruppen" aria-label="Fjern fra gruppen" onClick={() => update((d) => unlinkTx(d, tx.id))}>Fjern</button>
+        </div>
+      )}
+      {adding ? (
+        <span className="tx-link-add" onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === 'Escape') setAdding(false); }}>
+          <SearchCombo className="sm" options={options} value={undefined} placeholder="Hører sammen med…" searchPlaceholder="Søg dato, tekst eller beløb…"
+            ariaLabel="Hører sammen med" emptyText="Ingen transaktion matcher"
+            onChange={(id) => { if (id) { update((d) => linkTxs(d, tx.id, id)); setAdding(false); } }} />
+          <button className="btn sm ghost" onClick={() => setAdding(false)} aria-label="Annullér">✕</button>
+        </span>
+      ) : (
+        <span className="row" style={{ gap: 10 }}>
+          {addNote && <button className="add-memo" onClick={addNote}>+ Note</button>}
+          <button className="add-memo" title="Knyt transaktionen til en anden – en note til dig selv om, at de hører sammen" onClick={() => {
+            setAdding(true);
+            setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Hører sammen med"]')?.focus(), 0);
+          }}>{others.length ? '+ Flere' : '🔗 Hører sammen med…'}</button>
+        </span>
+      )}
+    </>
   );
 }
 

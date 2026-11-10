@@ -27,6 +27,10 @@ interface State {
   setView: (v: View, settingsTab?: string) => void;
   showTx: (id: string) => void;
   clearFocusTx: () => void;
+  /** Gå til Overførsler med fokus på en post (konto) eller én bestemt overførsel. */
+  transferFocus?: { accountId?: string; txId?: string };
+  showTransfers: (focus: { accountId?: string; txId?: string }) => void;
+  clearTransferFocus: () => void;
   setPeriod: (id?: string) => void;
 }
 
@@ -70,6 +74,8 @@ export const useStore = create<State>()(
       setView: (view, settingsTab) => set({ view, settingsTab }),
       showTx: (focusTxId) => set({ view: 'ledger', focusTxId }),
       clearFocusTx: () => set({ focusTxId: undefined }),
+      showTransfers: (transferFocus) => set({ view: 'transfers', transferFocus }),
+      clearTransferFocus: () => set({ transferFocus: undefined }),
       setPeriod: (periodId) => set({ periodId }),
     }),
     {

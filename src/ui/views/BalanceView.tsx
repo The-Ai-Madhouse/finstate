@@ -1,3 +1,4 @@
+import { TRANSFER_LABEL, transferInfo, type TransferKind } from '../../domain/transfers';
 import { NoPeriod } from '../components/PeriodPrompt';
 import { Fragment, useState } from 'react';
 import { KIND_HINT, KIND_LABEL, NO_TYPE, noteFor, suggestCategory, switchKind, typeName, withAccountInPeriods, withValuation } from '../../domain/accountTypes';
@@ -298,6 +299,7 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
           </section>
         )}
 
+        <AccountTransfers acc={acc} period={period} />
         <section className="drawer-sec full">
           <h4>Kommentar for {period.name}</h4>
           <textarea key={`${period.id}:${note}`} rows={2} defaultValue={note} placeholder="Fx rente 4 %, aftale om tilbagebetaling, hvor værdien kommer fra …"
@@ -474,3 +476,37 @@ function DeleteAccountButton({ acc }: { acc: Account }) {
     </div>
   );
 }
+
+/** I postens detaljer: periodens interne overførsler på posten – parret, direkte, undervejs eller uden modpost – med link til Overførsler. */
+function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
+  const e = useEngine();
+  const ref = `acc:${acc.id}`;
+  const ids = new Set(e.ledger.postings.filter((p) => p.ref === ref && p.txId && p.date >= period.start && p.date <= period.end).map((p) => p.txId!));
+  const counts: Record<TransferKind, number> = { pair: 0, transit: 0, direct: 0, missing: 0 };
+  for (const id of ids) {
+    const t = e.txById.get(id);
+    const info = t && transferInfo(e.data, e.resolved, e.txById, t, period);
+    if (info) counts[info.kind]++;
+  }
+  const total = counts.pair + counts.transit + counts.direct + counts.missing;
+  if (!total) return null;
+  const KINDS: TransferKind[] = ['pair', 'direct', 'transit', 'missing'];
+  return (
+    <section className="drawer-sec full">
+      <h4>Interne overførsler i {period.name}</h4>
+      <div className="row small" style={{ gap: 8 }}>
+        {KINDS.filter((k) => counts[k]).map((k) => (
+          <span key={k} className={`chip ${k === 'pair' ? 'user' : k === 'missing' ? 'review' : ''}`} title={TIP[k]}>{k === 'pair' ? '⇄ ' : ''}{counts[k]} {TRANSFER_LABEL[k].toLowerCase()}</span>
+        ))}
+        <span className="spacer" />
+        <button className="btn sm" onClick={() => useStore.getState().showTransfers({ accountId: acc.id })}>Se og ret i Overførsler →</button>
+      </div>
+    </section>
+  );
+}
+const TIP: Record<TransferKind, string> = {
+  pair: 'Mellem to bankkonti, du importerer – begge sider er fundet og sat sammen',
+  direct: 'Til/fra en post, du ikke importerer (depot, lån, en person) – kun én side, intet at parre',
+  transit: 'Modposten ligger i en anden periode – pengene er undervejs',
+  missing: 'Den anden side af overførslen er ikke fundet',
+};

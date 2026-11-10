@@ -621,3 +621,22 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 /* Afstemning: saldo fra før perioden */
 tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .xfer-item.transit { border-left-color: var(--accent); }
+
+/* "Hører sammen med" – note om transaktioner, der hører sammen */
+.tx-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px dashed var(--line-strong); background: color-mix(in srgb, var(--accent) 6%, transparent); max-width: 100%; }
+.tx-links-label { color: var(--ink-2); font-weight: 600; }
+.tx-link { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.tx-link .linkish { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.tx-link-x { all: unset; cursor: pointer; color: var(--muted); font-size: 11px; padding: 0 2px; }
+.tx-link-x:hover { color: var(--critical); }
+.tx-link-add { display: inline-flex; gap: 4px; align-items: center; }
+.tx-link-add .combo { min-width: 300px; }
+
+/* Sammenfoldelig kortoverskrift */
+.fold-head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fold-head h2 { margin: 0; }
+.fold-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.xfer-legend { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; margin: 4px 0 0; align-items: baseline; }
+.xfer-legend dd { margin: 0; }
+.fold-head h2 { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--surface); font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 10px; border-radius: 4px; line-height: 1.35; }
+.card-head > .fold-head { flex: 1 1 auto; }

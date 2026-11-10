@@ -1,9 +1,10 @@
 import { NoPeriod } from '../components/PeriodPrompt';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import type { Account, Classification, Period, Tx } from '../../domain/types';
 import { textMatches } from '../../domain/txfilter';
+import { transferInfo } from '../../domain/transfers';
 import { dayDiff } from '../../domain/util';
 import { pairTxs, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
@@ -49,17 +50,16 @@ function Internal() {
   const seen = new Set<string>();
   for (const t of internal) {
     if (seen.has(t.id)) continue;
-    const r = e.resolved.get(t.id)!;
-    const pair = r.pairId ? e.txById.get(r.pairId) : undefined;
-    const target = acc(r.lines.find((l) => l.type === 'internal')?.targetAccountId);
-    if (pair && !inPeriod(pair, period)) {
-      items.push({ kind: 'transit', key: t.id, t, partner: pair, target });
-    } else if (pair) {
-      seen.add(pair.id);
-      const [out, inn] = t.amount < 0 ? [t, pair] : [pair, t];
-      items.push({ kind: 'pair', key: `${out.id}|${inn.id}`, out, inn, manual: t.pairWith === pair.id });
-    } else if (target && (target.kind !== 'bank' || !data.txs.some((x) => x.accountId === target.id))) {
-      items.push({ kind: 'direct', key: t.id, t, target });
+    const info = transferInfo(data, e.resolved, e.txById, t, period)!;
+    const { partner: pair, target } = info;
+    if (info.kind === 'transit') {
+      items.push({ kind: 'transit', key: t.id, t, partner: pair!, target });
+    } else if (info.kind === 'pair') {
+      seen.add(pair!.id);
+      const [out, inn] = t.amount < 0 ? [t, pair!] : [pair!, t];
+      items.push({ kind: 'pair', key: `${out.id}|${inn.id}`, out, inn, manual: t.pairWith === pair!.id });
+    } else if (info.kind === 'direct') {
+      items.push({ kind: 'direct', key: t.id, t, target: target! });
     } else items.push({ kind: 'missing', key: t.id, t, target });
   }
   const count = { missing: 0, paired: 0, transit: 0, direct: 0, all: items.length };
@@ -69,8 +69,26 @@ function Internal() {
   const [q, setQ] = useState('');
   const [accountId, setAccountId] = useState<string>();
   const [editing, setEditing] = useState<string>();
+  // Kommer man fra Aktiver & passiver: vis én overførsel eller alle for en post.
+  const [onlyTx, setOnlyTx] = useState<string>();
+  const focus = useStore((st) => st.transferFocus);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focus) return;
+    setFolded(false);
+    setStatus('all');
+    setQ('');
+    setAccountId(focus.txId ? undefined : focus.accountId);
+    setOnlyTx(focus.txId);
+    useStore.getState().clearTransferFocus();
+    setTimeout(() => cardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+  }, [focus]);
+  // Listen kan fylde meget – den kan foldes sammen (huskes i browseren).
+  const [folded, setFolded] = useState(() => { try { return localStorage.getItem('finstate:ui:xfer-folded') === '1'; } catch { return false; } });
+  const toggleFold = () => setFolded((f) => { try { localStorage.setItem('finstate:ui:xfer-folded', f ? '0' : '1'); } catch { /* ignore */ } return !f; });
   const txsOf = (i: Item) => (i.kind === 'pair' ? [i.out, i.inn] : [i.t]);
   const shown = items
+    .filter((i) => !onlyTx || txsOf(i).some((t) => t.id === onlyTx) || (i.kind === 'transit' && i.partner.id === onlyTx))
     .filter((i) => status === 'all' || (status === 'paired' ? i.kind === 'pair' : i.kind === status))
     .filter((i) => !accountId || txsOf(i).some((t) => t.accountId === accountId) || (i.kind !== 'pair' && i.target?.id === accountId))
     .filter((i) => !q.trim() || txsOf(i).some((t) => textMatches(t, q)) || (i.kind !== 'pair' && !!i.target && i.target.name.toLowerCase().includes(q.trim().toLowerCase())))
@@ -88,30 +106,44 @@ function Internal() {
       <div className="small muted">{note}</div>
     </div>
   );
-  const SEG: { id: Status; label: string }[] = [
-    { id: 'missing', label: `Mangler modpost (${count.missing})` },
-    { id: 'paired', label: `Parret (${count.paired})` },
-    ...(count.transit ? [{ id: 'transit' as Status, label: `Undervejs (${count.transit})` }] : []),
-    { id: 'direct', label: `Direkte til post (${count.direct})` },
-    { id: 'all', label: `Alle (${count.all})` },
+  const SEG: { id: Status; label: string; tip: string }[] = [
+    { id: 'missing', label: `Mangler modpost (${count.missing})`, tip: 'Overførsler mellem dine bankkonti, hvor den anden side ikke er fundet' },
+    { id: 'paired', label: `Parret (${count.paired})`, tip: 'Begge sider fundet – ud på den ene konto, ind på den anden' },
+    ...(count.transit ? [{ id: 'transit' as Status, label: `Undervejs (${count.transit})`, tip: 'Modposten ligger i en anden periode' }] : []),
+    { id: 'direct', label: `Direkte til post (${count.direct})`, tip: 'Til en post, du ikke importerer (depot, lån, en person) – kun én side, intet at parre' },
+    { id: 'all', label: `Alle (${count.all})`, tip: 'Alle interne overførsler i perioden' },
   ];
 
   return (
-    <div className="card">
+    <div className="card" ref={cardRef}>
       <div className="card-head">
-        <h2 className="grow">Interne overførsler</h2>
+        <button className="fold-head grow" onClick={toggleFold} aria-expanded={!folded}>
+          <span className={`caret ${folded ? '' : 'open'}`} aria-hidden>›</span>
+          <h2>Interne overførsler</h2>
+          {folded && <span className="small muted">{count.paired} parret · {count.direct} direkte{count.transit ? ` · ${count.transit} undervejs` : ''}{count.missing ? '' : ' · alle har en modpost'}</span>}
+        </button>
+        {folded && count.missing > 0 && <span className="chip review">{count.missing} mangler modpost</span>}
         {transitRows.map((r) => (
           <span key={r.ref} className="chip" title={`Penge undervejs ved periodens slutning (primo ${kr(r.open)})`}>{r.label}: {kr(r.close)}</span>
         ))}
       </div>
-      <InfoBox>
-        Interne overførsler flytter kun penge mellem dine egne poster. To sider af samme overførsel parres – automatisk, når beløbet passer og datoerne ligger tæt, ellers med "Par".
-        Lander modposten først i næste periode, står beløbet som <b>Penge undervejs</b> til den konto, hvor pengene forventes at lande.
-        Overførsler til poster, du ikke importerer (fx et depot eller "Jonas skylder mig"), bogføres direkte og skal ikke parres.
+      {!folded && <>
+      <InfoBox label="Parret, direkte, undervejs – hvad er forskellen?">
+        <dl className="xfer-legend">
+          <dt><span className="chip user">⇄ Parret</span></dt>
+          <dd>Overførsel mellem <b>to bankkonti, du importerer</b>. Den står derfor i begge kontis udtog – ud på den ene, ind på den anden – og de to sider skal findes og sættes sammen.
+            Det sker automatisk, når beløbet passer og datoerne ligger tæt; ellers trykker du "Par".</dd>
+          <dt><span className="chip">Direkte</span></dt>
+          <dd>Overførsel til en <b>post, du ikke importerer</b> – fx et depot, et lån eller "Jonas skylder mig". Der er kun én side (din bankkonto), så der er intet at parre: beløbet bogføres direkte på posten.</dd>
+          <dt><span className="chip review">Mangler modpost</span></dt>
+          <dd>Den ene side af en overførsel mellem dine bankkonti er fundet, men ikke den anden. Find den, eller ret transaktionen, hvis den ikke er en intern overførsel.</dd>
+          <dt><span className="chip">Undervejs</span></dt>
+          <dd>Modposten ligger i en anden periode (fx sendt 31.12, landet 2.1). I denne periode står beløbet som <b>penge undervejs</b> til den konto, hvor pengene lander.</dd>
+        </dl>
       </InfoBox>
       <div className="row xfer-filters">
         <div className="seg" role="radiogroup" aria-label="Status">
-          {SEG.map((x) => <button key={x.id} role="radio" aria-checked={status === x.id} className={status === x.id ? 'on plain' : ''} onClick={() => setStatus(x.id)}>{x.label}</button>)}
+          {SEG.map((x) => <button key={x.id} role="radio" aria-checked={status === x.id} title={x.tip} className={status === x.id ? 'on plain' : ''} onClick={() => setStatus(x.id)}>{x.label}</button>)}
         </div>
         <div className="search-wrap grow">
           <input className="search-input sm" placeholder="Søg i tekst, konto eller beløb…" value={q} onChange={(ev) => setQ(ev.target.value)} aria-label="Søg i interne overførsler" />
@@ -120,6 +152,11 @@ function Internal() {
         <AccountSelect className="sm" value={accountId} onChange={setAccountId} placeholder="Alle konti" />
         {(q || accountId) && <button className="btn sm ghost" onClick={() => { setQ(''); setAccountId(undefined); }}>Nulstil</button>}
       </div>
+      {onlyTx && (
+        <div className="banner info" style={{ marginBottom: 8 }}>
+          Viser den overførsel, du kom fra. <span className="spacer" /><button className="btn sm" onClick={() => setOnlyTx(undefined)}>Vis alle overførsler</button>
+        </div>
+      )}
 
       {!shown.length ? (
         <Empty>{!items.length ? 'Ingen interne overførsler i perioden.' : status === 'missing' && !q && !accountId ? 'Alle interne overførsler har en modpost. 🎉' : 'Ingen overførsler matcher.'}</Empty>
@@ -165,6 +202,7 @@ function Internal() {
           })}
         </div>
       )}
+      </>}
     </div>
   );
 }
