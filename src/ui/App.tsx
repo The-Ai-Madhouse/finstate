@@ -14,6 +14,7 @@ import { SettingsView } from './views/SettingsView';
 import { SlidesView } from './views/SlidesView';
 import { StatementView } from './views/StatementView';
 import { TransfersView } from './views/TransfersView';
+import { VersionsView } from './views/VersionsView';
 import { PairDialog } from './components/PairDialog';
 
 /** Arbejdstrin: her skal brugeren gøre noget → nummer, der bliver til ✓. */
@@ -30,6 +31,7 @@ const RESULTS: { id: View; label: string; icon: string }[] = [
 ];
 
 export function App() {
+  const saveMode = useStore((s) => s.saveStatus.mode);
   const view = useStore((s) => s.view);
   const engine = useEngine();
   const period = usePeriod();
@@ -75,7 +77,7 @@ export function App() {
           <NavItem id="settings" label="Indstillinger" icon={<span className="step">⚙</span>} />
         </div>
         <div className="nav-foot">
-          Data forlader aldrig din computer. Gemmes i denne browser – tag backup.
+          Data forlader aldrig din computer. {saveMode === 'file' ? 'Gemmes i en fil på computeren.' : 'Gemmes kun i denne browser – start med npm start.'}
           <div className="nav-version" title={VERSION_DETAILS}>{VERSION_LABEL}</div>
         </div>
       </nav>
@@ -91,6 +93,7 @@ export function App() {
           {view === 'statement' && <StatementView />}
           {view === 'slides' && <SlidesView />}
           {view === 'settings' && <SettingsView />}
+          {view === 'versions' && <VersionsView />}
         </div>
       </div>
     </div>
@@ -113,6 +116,8 @@ function NavItem({ id, label, icon, extra, title, disabled }: { id: View; label:
 function TopBar() {
   const data = useStore((s) => s.data);
   const storageError = useStore((s) => s.storageError);
+  const save = useStore((s) => s.saveStatus);
+  const setView = useStore((s) => s.setView);
   const period = usePeriod();
   const { lastExportAt, lastChangeAt } = data.settings;
   const dirty = !!lastChangeAt && (!lastExportAt || lastChangeAt > lastExportAt);
@@ -124,12 +129,17 @@ function TopBar() {
           ? <span className="crumb">Financial statement · <b>{period.name}</b> <span className="muted">({period.start} – {period.end})</span></span>
           : <span className="crumb muted">Intet financial statement valgt</span>}
         <span className="spacer" />
-        <span className={`chip ${dirty && data.txs.length ? 'review' : ''}`} title={lastExportAt ? `Sidste backup ${lastExportAt}` : 'Ingen backup endnu'}>
+        {save.mode === 'file'
+          ? <span className="chip user" title={`Gemmes automatisk i ${save.dir}/finstate.json${save.savedAt ? ` · senest ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>💾 Gemt på computeren</span>
+          : save.mode === 'browser' ? <span className="chip review" title={save.error}>⚠ Kun i browseren</span> : null}
+        <button className="btn sm" onClick={() => setView('versions')} title="Gem en version (milepæl), se ændringer siden – og gå tilbage">🕘 Versioner</button>
+        <span className={`chip ${dirty && data.txs.length && save.mode !== 'file' ? 'review' : ''}`} title={lastExportAt ? `Sidste backup ${lastExportAt}` : 'Ingen backup endnu'}>
           {dirty ? (days === null ? 'Ingen backup endnu' : `Ændringer siden backup (${days} d.)`) : 'Backup er opdateret'}
         </span>
-        <button className={`btn sm ${dirty && data.txs.length ? 'primary' : ''}`} onClick={() => exportBackup('full')}>Eksportér backup</button>
+        <button className={`btn sm ${dirty && data.txs.length && save.mode !== 'file' ? 'primary' : ''}`} onClick={() => exportBackup('full')}>Eksportér backup</button>
       </div>
       {storageError && <div className="banner error" style={{ margin: '12px 24px 0' }}>{storageError}</div>}
+      {save.mode === 'browser' && save.error && <div className="banner warn" style={{ margin: '12px 24px 0' }}>{save.error}</div>}
     </>
   );
 }

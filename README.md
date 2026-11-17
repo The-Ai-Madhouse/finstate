@@ -8,13 +8,17 @@ npm start        # åbner http://127.0.0.1:5173
 npm test         # tests af regnskabsmotoren
 ```
 
-> **Brug altid samme adresse** (`http://127.0.0.1:5173`). localStorage er bundet til adressen – `localhost:5173`
-> eller en anden port ligner en tom app. Tag backup (knappen øverst til højre) efter hver arbejdsgang.
+> **Data gemmes i en fil på din computer**: `~/Documents/Finstate/finstate.json` (en anden mappe med
+> `FINSTATE_DIR=/sti/til/mappe npm start` – altid uden for projektet). Filen skrives, mens `npm start` kører;
+> browseren har kun en kopi og bruges som nødløsning, hvis serveren ikke kører. Første gang flyttes browserens data over i filen.
+>
+> **Versioner** (knappen øverst): gem en navngiven milepæl, se hvad der er ændret siden, og gå tilbage.
+> Versionerne ligger i `~/Documents/Finstate/versions/`.
 
 ## Privatliv
 - Ingen server, intet login, ingen analytics. En Content-Security-Policy i `index.html` forhindrer siden i at
   sende data nogen steder hen (kun dev-serverens egen websocket er tilladt).
-- Data ligger i `localStorage` (nøgle `finstate:v1`). Backupfiler indeholder bankdata – `.gitignore` udelukker `*.csv` og backups.
+- Data ligger i en fil på din computer (se ovenfor), med en kopi i browserens `localStorage` (nøgle `finstate:v1`). Den lokale server svarer kun Finstate selv (127.0.0.1, Host/Origin tjekkes) og nægter en datamappe inde i projektet. Backupfiler indeholder bankdata – `.gitignore` udelukker `*.csv` og backups.
 - Demodata og eksempelkategorier er opdigtede. En lokal pre-commit-hook (`scripts/pre-commit`) kan blokere egne
   private ord fra en ikke-versioneret `.private-terms`-fil.
 

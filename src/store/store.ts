@@ -5,7 +5,7 @@ import { withAutoBookStart } from '../domain/engine';
 import type { TxFilter } from '../domain/txfilter';
 import type { AppData } from '../domain/types';
 
-export type View = 'overview' | 'import' | 'ledger' | 'transfers' | 'balance' | 'statement' | 'slides' | 'settings';
+export type View = 'overview' | 'import' | 'ledger' | 'transfers' | 'balance' | 'statement' | 'slides' | 'settings' | 'versions';
 
 interface State {
   data: AppData;
@@ -16,6 +16,7 @@ interface State {
   /** Transaktion der skal vises/fremhæves i Kategorisér (fx fra Overførsler). */
   focusTxId?: string;
   storageError?: string;
+  saveStatus: SaveStatus;
   /** Kategorisér: søgning og filtre huskes, når man går væk og kommer tilbage. */
   ledgerFilter: LedgerFilter;
   setLedgerFilter: (patch: Partial<LedgerFilter>) => void;
@@ -56,16 +57,86 @@ export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status:
 
 const KEY = 'finstate:v1';
 
-// localStorage med tydelig fejl, hvis pladsen (≈5 MB) slipper op – så intet tabes i stilhed.
-const safeStorage: StateStorage = {
-  getItem: (k) => localStorage.getItem(k),
+/** Hvor gemmes der lige nu? file = i datafilen på computeren (via npm start), browser = kun i browseren (serveren svarer ikke). */
+export interface SaveStatus { mode: 'loading' | 'file' | 'browser'; dir?: string; savedAt?: string; error?: string }
+
+let hydrated = false;
+let timer: ReturnType<typeof setTimeout> | undefined;
+let pending: string | undefined;
+let serverOk = false;
+
+const setStatus = (patch: Partial<SaveStatus>) => {
+  // useStore er defineret længere nede – kaldes først, når appen kører.
+  const cur = useStore.getState().saveStatus;
+  useStore.setState({ saveStatus: { ...cur, ...patch } });
+};
+
+async function putFile(text: string) {
+  try {
+    const r = await fetch('/api/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: text });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`);
+    serverOk = true;
+    setStatus({ mode: 'file', savedAt: new Date().toISOString(), error: undefined });
+  } catch (e) {
+    serverOk = false;
+    setStatus({ mode: 'browser', error: `Kunne ikke gemme i datafilen (${(e as Error).message}). Data er kun gemt i browseren – kører "npm start"?` });
+  }
+}
+
+function flush() {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+  if (pending !== undefined) { const t = pending; pending = undefined; void putFile(t); }
+}
+
+// Gem det sidste, når fanen lukkes (sendBeacon overlever, at siden forsvinder).
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    if (pending !== undefined && serverOk) navigator.sendBeacon('/api/data', new Blob([pending], { type: 'application/json' }));
+    pending = undefined;
+  });
+}
+
+/**
+ * Lagring: datafilen på computeren er det rigtige sted; browserens localStorage er en kopi/nødløsning.
+ * Første gang (ingen datafil endnu) flyttes browserens data over i filen.
+ */
+const fileStorage: StateStorage = {
+  getItem: async (k) => {
+    let local: string | null = null;
+    try { local = localStorage.getItem(k); } catch { /* ingen adgang */ }
+    try {
+      const info = await fetch('/api/storage', { cache: 'no-store' });
+      if (!info.ok) throw new Error((await info.json().catch(() => ({}))).error ?? `HTTP ${info.status}`);
+      const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string };
+      serverOk = true;
+      setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined });
+      if (meta.exists) {
+        const r = await fetch('/api/data', { cache: 'no-store' });
+        if (r.ok) return await r.text();
+      }
+      // Ingen datafil endnu: flyt browserens data over.
+      if (local) await putFile(local);
+      return local;
+    } catch (e) {
+      serverOk = false;
+      setStatus({ mode: 'browser', error: `Datafilen kunne ikke læses (${(e as Error).message}). Viser browserens kopi – kører "npm start"?` });
+      return local;
+    }
+  },
   setItem: (k, v) => {
+    // Gem aldrig noget, før data er indlæst – ellers kunne en tom start overskrive filen.
+    if (!hydrated) return;
     try {
       localStorage.setItem(k, v);
       if (useStore.getState().storageError) useStore.setState({ storageError: undefined });
     } catch (e) {
-      useStore.setState({ storageError: `Kunne ikke gemme i browseren (${(e as Error).name}). Eksportér en backup nu!` });
+      // Fyldt browser er kun et problem, hvis datafilen heller ikke virker.
+      if (!serverOk) useStore.setState({ storageError: `Kunne ikke gemme i browseren (${(e as Error).name}), og datafilen svarer ikke. Eksportér en backup nu!` });
     }
+    pending = v;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(flush, 400);
   },
   removeItem: (k) => localStorage.removeItem(k),
 };
@@ -75,6 +146,7 @@ export const useStore = create<State>()(
     (set) => ({
       data: emptyData(),
       view: 'overview',
+      saveStatus: { mode: 'loading' },
       ledgerFilter: DEFAULT_LEDGER_FILTER,
       setLedgerFilter: (patch) => set((s) => ({ ledgerFilter: { ...s.ledgerFilter, ...patch } })),
       resetLedgerFilter: () => set((s) => ({ ledgerFilter: { ...DEFAULT_LEDGER_FILTER, sort: s.ledgerFilter.sort } })),
@@ -102,7 +174,8 @@ export const useStore = create<State>()(
     {
       name: KEY,
       version: 1,
-      storage: createJSONStorage(() => safeStorage),
+      storage: createJSONStorage(() => fileStorage),
+      onRehydrateStorage: () => () => { hydrated = true; },
       partialize: (s) => ({ data: s.data, view: s.view, periodId: s.periodId }),
       // Nye felter i fremtidige versioner får standardværdier.
       merge: (persisted, current) => {

@@ -741,3 +741,14 @@ tr.settle-carried td { color: var(--ink-2); }
 .viz-tip-row.sep { border-top: 1px solid var(--line); margin-top: 3px; padding-top: 3px; }
 .viz-table th, .viz-table td { white-space: nowrap; padding: 3px 6px; }
 @media (max-width: 900px) { .viz-grid2 { grid-template-columns: 1fr; } }
+.boot { padding: 48px; color: var(--muted); font-size: 14px; }
+
+/* Versioner */
+.change-group { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.change-group > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; list-style: none; }
+.change-group > summary::-webkit-details-marker { display: none; }
+.change-group > summary::before { content: '›'; color: var(--muted); transition: transform 0.15s; display: inline-block; width: 10px; }
+.change-group[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
+.change-body { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.change-line { gap: 8px; flex-wrap: nowrap; padding: 2px 0; border-top: 1px dashed var(--line); }
+tr.selected td { background: var(--accent-soft); }

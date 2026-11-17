@@ -1032,3 +1032,38 @@ describe('indsigter måned for måned', () => {
     expect(monthsOf({ start: '2026-01-01', end: '2026-12-31' }, '2026-03-15')).toEqual(['2026-01', '2026-02', '2026-03']);
   });
 });
+
+describe('versionsstyring: ændringer mellem to versioner', () => {
+  it('finds recategorised transactions, renamed categories, new posts and changed values', async () => {
+    const { diffData } = await import('./diff');
+    const a = demoData();
+    const tx = a.txs.find((t) => t.text.startsWith('Fitness Puls'))!;
+    const b = {
+      ...a,
+      txs: a.txs.map((t) => (t.id === tx.id ? { ...t, manual: { type: 'expense' as const, categoryId: 'ex-hobby-sport' }, memo: 'Træning' } : t)),
+      categories: a.categories.map((c) => (c.id === 'ex-dagligvarer' ? { ...c, name: 'Mad' } : c)),
+      accounts: [...a.accounts, { id: 'acc-ny', name: 'Kontanter', kind: 'tracked' as const, side: 'asset' as const, aliases: [] }],
+      valuations: a.valuations.map((v) => (v.id === 'v-dep-1' ? { ...v, value: v.value + 100000 } : v)),
+    };
+    const d = diffData(a, b);
+    expect(d.txChanged.map((x) => [x.tx.id, x.after])).toEqual([[tx.id, 'Udgift · Hobby & sport']]);
+    expect(d.notesChanged).toHaveLength(1);
+    expect(d.catChanged).toEqual([{ before: 'Dagligvarer', after: 'Mad' }]);
+    expect(d.accAdded.map((x) => x.name)).toEqual(['Kontanter']);
+    expect(d.valuations).toEqual([{ account: 'Aktiedepot', date: '2025-12-31', before: 3565000, after: 3665000 }]);
+    expect(diffData(a, a).total).toBe(0);
+  });
+});
+
+describe('datamappe', () => {
+  it('refuses a data folder inside the project, so data never ends up in git', async () => {
+    const { storageDir } = await import('../../server/storage');
+    const root = '/tmp/finstate-projekt';
+    const keep = process.env.FINSTATE_DIR;
+    process.env.FINSTATE_DIR = `${root}/data`;
+    expect(() => storageDir(root)).toThrow(/inde i projektet/);
+    process.env.FINSTATE_DIR = '/tmp/et-andet-sted/Finstate';
+    expect(storageDir(root)).toBe('/tmp/et-andet-sted/Finstate');
+    if (keep === undefined) delete process.env.FINSTATE_DIR; else process.env.FINSTATE_DIR = keep;
+  });
+});
