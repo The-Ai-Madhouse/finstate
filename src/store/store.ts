@@ -17,6 +17,8 @@ interface State {
   focusTxId?: string;
   storageError?: string;
   saveStatus: SaveStatus;
+  /** Login udløbet/logget ud – vis login igen. */
+  authLost?: boolean;
   /** Kategorisér: søgning og filtre huskes, når man går væk og kommer tilbage. */
   ledgerFilter: LedgerFilter;
   setLedgerFilter: (patch: Partial<LedgerFilter>) => void;
@@ -57,13 +59,12 @@ export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status:
 
 const KEY = 'finstate:v1';
 
-/** Hvor gemmes der lige nu? file = i datafilen på computeren (via npm start), browser = kun i browseren (serveren svarer ikke). */
-export interface SaveStatus { mode: 'loading' | 'file' | 'browser'; dir?: string; savedAt?: string; error?: string }
+/** Hvor gemmes der lige nu? file = krypteret i datafilen (via serveren); error = serveren kunne ikke gemme. */
+export interface SaveStatus { mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string }
 
 let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pending: string | undefined;
-let serverOk = false;
 
 const setStatus = (patch: Partial<SaveStatus>) => {
   // useStore er defineret længere nede – kaldes først, når appen kører.
@@ -71,74 +72,71 @@ const setStatus = (patch: Partial<SaveStatus>) => {
   useStore.setState({ saveStatus: { ...cur, ...patch } });
 };
 
+/** Login er udløbet (eller logget ud et andet sted): vis login igen – data bliver liggende til bagefter. */
+const lost = () => useStore.setState({ authLost: true });
+
 async function putFile(text: string) {
   try {
     const r = await fetch('/api/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: text });
+    if (r.status === 401) { pending = text; lost(); return; }
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`);
-    serverOk = true;
     setStatus({ mode: 'file', savedAt: new Date().toISOString(), error: undefined });
   } catch (e) {
-    serverOk = false;
-    setStatus({ mode: 'browser', error: `Kunne ikke gemme i datafilen (${(e as Error).message}). Data er kun gemt i browseren – kører "npm start"?` });
+    // Gem igen ved næste ændring – og sig det tydeligt.
+    pending ??= text;
+    setStatus({ mode: 'error', error: `Kunne ikke gemme (${(e as Error).message}). Kører serveren? Dine ændringer gemmes, så snart den svarer igen.` });
   }
 }
 
-function flush() {
+export function flushSave() {
   if (timer) clearTimeout(timer);
   timer = undefined;
   if (pending !== undefined) { const t = pending; pending = undefined; void putFile(t); }
 }
 
-// Gem det sidste, når fanen lukkes (sendBeacon overlever, at siden forsvinder).
+// Gem det sidste, når fanen lukkes (sendBeacon overlever, at siden forsvinder – cookien følger med).
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', () => {
-    if (pending !== undefined && serverOk) navigator.sendBeacon('/api/data', new Blob([pending], { type: 'application/json' }));
+    if (pending !== undefined) navigator.sendBeacon('/api/data', new Blob([pending], { type: 'application/json' }));
     pending = undefined;
   });
 }
 
+/** Ældre versioner gemte en ukrypteret kopi i browseren – flyttes til den krypterede fil og slettes her. */
+const LEGACY_KEY = 'finstate:v1';
+const legacyLocal = () => { try { return localStorage.getItem(LEGACY_KEY); } catch { return null; } };
+const dropLegacy = () => { try { localStorage.removeItem(LEGACY_KEY); } catch { /* ingen adgang */ } };
+
 /**
- * Lagring: datafilen på computeren er det rigtige sted; browserens localStorage er en kopi/nødløsning.
- * Første gang (ingen datafil endnu) flyttes browserens data over i filen.
+ * Lagring: kun i den krypterede datafil via serveren (efter login). Intet gemmes i browseren.
  */
 const fileStorage: StateStorage = {
-  getItem: async (k) => {
-    let local: string | null = null;
-    try { local = localStorage.getItem(k); } catch { /* ingen adgang */ }
-    try {
-      const info = await fetch('/api/storage', { cache: 'no-store' });
-      if (!info.ok) throw new Error((await info.json().catch(() => ({}))).error ?? `HTTP ${info.status}`);
-      const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string };
-      serverOk = true;
-      setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined });
-      if (meta.exists) {
-        const r = await fetch('/api/data', { cache: 'no-store' });
-        if (r.ok) return await r.text();
-      }
-      // Ingen datafil endnu: flyt browserens data over.
-      if (local) await putFile(local);
-      return local;
-    } catch (e) {
-      serverOk = false;
-      setStatus({ mode: 'browser', error: `Datafilen kunne ikke læses (${(e as Error).message}). Viser browserens kopi – kører "npm start"?` });
-      return local;
+  getItem: async () => {
+    const info = await fetch('/api/storage', { cache: 'no-store' });
+    if (info.status === 401) { lost(); throw new Error('Ikke logget ind'); }
+    if (!info.ok) throw new Error((await info.json().catch(() => ({}))).error ?? `HTTP ${info.status}`);
+    const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string };
+    setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined });
+    const local = legacyLocal();
+    if (meta.exists) {
+      const r = await fetch('/api/data', { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const text = await r.text();
+      dropLegacy();
+      return text;
     }
+    // Ingen datafil endnu: flyt browserens gamle data over i den krypterede fil.
+    if (local) { await putFile(local); dropLegacy(); }
+    return local;
   },
-  setItem: (k, v) => {
+  setItem: (_k, v) => {
     // Gem aldrig noget, før data er indlæst – ellers kunne en tom start overskrive filen.
     if (!hydrated) return;
-    try {
-      localStorage.setItem(k, v);
-      if (useStore.getState().storageError) useStore.setState({ storageError: undefined });
-    } catch (e) {
-      // Fyldt browser er kun et problem, hvis datafilen heller ikke virker.
-      if (!serverOk) useStore.setState({ storageError: `Kunne ikke gemme i browseren (${(e as Error).name}), og datafilen svarer ikke. Eksportér en backup nu!` });
-    }
     pending = v;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, 400);
+    timer = setTimeout(flushSave, 400);
   },
-  removeItem: (k) => localStorage.removeItem(k),
+  removeItem: () => {},
 };
 
 export const useStore = create<State>()(
@@ -175,7 +173,9 @@ export const useStore = create<State>()(
       name: KEY,
       version: 1,
       storage: createJSONStorage(() => fileStorage),
-      onRehydrateStorage: () => () => { hydrated = true; },
+      // Data indlæses først efter login (se main.tsx).
+      skipHydration: true,
+      onRehydrateStorage: () => (_state, error) => { if (!error) hydrated = true; },
       partialize: (s) => ({ data: s.data, view: s.view, periodId: s.periodId }),
       // Nye felter i fremtidige versioner får standardværdier.
       merge: (persisted, current) => {
@@ -195,10 +195,3 @@ if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
 export const useData = () => useStore((s) => s.data);
 export const update = (recipe: (d: AppData) => AppData) => useStore.getState().update(recipe);
 
-export function storageUsage(): number {
-  try {
-    return (localStorage.getItem(KEY)?.length ?? 0) * 2;
-  } catch {
-    return 0;
-  }
-}

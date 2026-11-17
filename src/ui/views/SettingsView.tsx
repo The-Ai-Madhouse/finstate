@@ -10,8 +10,9 @@ import { normalizeText } from '../../domain/normalize';
 import { TX_TYPE_LABEL, bankKey, type Account, type Rule, type TxType } from '../../domain/types';
 import { uid } from '../../domain/util';
 import { deleteRule, setBankMap, upsertRule, useEngine } from '../../store/actions';
-import { storageUsage, useStore } from '../../store/store';
+import { flushSave, useStore } from '../../store/store';
 import { exportBackup } from '../backup';
+import { authStatus, logout, newRecoveryCodes, type AuthStatus } from '../components/AuthGate';
 import { AccountSelect, AmountInput, CategoryCombo, ClassEditor, Empty, SearchCombo, TypeSelect, InfoBox } from '../components/common';
 import { KIND_LABEL, NO_TYPE, addAccountType } from '../../domain/accountTypes';
 
@@ -342,7 +343,6 @@ function DataTab() {
   const replaceAll = useStore((s) => s.replaceAll);
   const setPeriod = useStore((s) => s.setPeriod);
   const [msg, setMsg] = useState<{ level: 'info' | 'error'; text: string }>();
-  const kb = Math.round(storageUsage() / 1024);
 
   const onFile = async (f: File, mode: 'replace' | 'merge') => {
     try {
@@ -364,15 +364,15 @@ function DataTab() {
   return (
     <div className="stack">
       {msg && <div className={`banner ${msg.level}`}>{msg.text}</div>}
+      <SecurityCard />
       <div className="grid2">
         <div className="card">
-          <h2>Eksportér</h2>
-          <p className="ink2 small" style={{ marginBottom: 12 }}>
-            Alt ligger kun i denne browsers localStorage ({kb} KB brugt af ca. 5.000 KB). Ryddes browserdata, er det væk – så gem en backup efter hver arbejdsgang,
-            fx i en krypteret mappe. Backuppen indeholder dine bankdata: del den ikke.
-          </p>
+          <h2>Eksportér (ukrypteret)</h2>
+          <div className="banner warn small" style={{ marginBottom: 10 }}>
+            Denne fil er <b>ikke krypteret</b> og indeholder dine bankdata i klartekst. Brug hellere den krypterede backup ovenfor – og del aldrig filen.
+          </div>
           <div className="row">
-            <button className="btn primary" onClick={() => exportBackup('full')}>Fuld backup (.json)</button>
+            <button className="btn" onClick={() => exportBackup('full')}>Fuld backup (.json)</button>
             <button className="btn" onClick={() => exportBackup('rules')}>Kun regler, kategorier & konti</button>
           </div>
           <p className="small muted" style={{ marginTop: 8 }}>Regelpakken indeholder ingen transaktioner og kan bruges til at starte forfra eller flytte til en anden computer.</p>
@@ -403,6 +403,49 @@ function DataTab() {
             setPeriod(undefined);
           }}>Start forfra – behold regler</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Sikkerhed: login, gendannelseskoder og krypteret backup. */
+function SecurityCard() {
+  const save = useStore((s) => s.saveStatus);
+  const [st, setSt] = useState<AuthStatus>();
+  const [codes, setCodes] = useState<string[]>();
+  const [asking, setAsking] = useState<'all' | 'codes'>();
+  useEffect(() => { authStatus().then(setSt).catch(() => {}); }, []);
+  const out = async (everywhere: boolean) => { flushSave(); await logout(everywhere); location.reload(); };
+  return (
+    <div className="card">
+      <h2>Sikkerhed</h2>
+      <div className="col" style={{ gap: 10 }}>
+        <div className="small ink2">
+          🔒 Dine data er krypteret (AES-256) i <code>{save.dir ?? '…'}</code> og kan kun låses op med din adgangskode og 2FA.
+          {st?.expiresAt && <> Du er logget ind på denne enhed til <b>{new Date(st.expiresAt).toLocaleDateString('da-DK', { day: 'numeric', month: 'long' })}</b>{st.sessions && st.sessions > 1 ? ` · ${st.sessions} enheder er logget ind` : ''}.</>}
+          {st?.recoveryLeft !== undefined && <> {st.recoveryLeft} gendannelseskoder tilbage.</>}
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <a className="btn primary" href="/api/backup" download>Download krypteret backup</a>
+          <button className="btn" onClick={() => out(false)}>Log ud</button>
+          {asking === 'all'
+            ? <><span className="small">Log ud på alle enheder?</span><button className="btn sm danger-solid" onClick={() => out(true)}>Ja</button><button className="btn sm" onClick={() => setAsking(undefined)}>Annullér</button></>
+            : <button className="btn ghost" onClick={() => setAsking('all')}>Log ud på alle enheder</button>}
+          {asking === 'codes'
+            ? <><span className="small">De gamle koder holder op med at virke.</span><button className="btn sm primary" onClick={async () => { setCodes((await newRecoveryCodes()).recovery); setAsking(undefined); }}>Lav nye</button><button className="btn sm" onClick={() => setAsking(undefined)}>Annullér</button></>
+            : <button className="btn ghost" onClick={() => setAsking('codes')}>Nye gendannelseskoder</button>}
+        </div>
+        {codes && (
+          <div className="col" style={{ gap: 6 }}>
+            <div className="small"><b>Dine nye gendannelseskoder</b> – gem dem nu, de vises kun denne ene gang:</div>
+            <div className="auth-codes">{codes.map((c) => <code key={c}>{c}</code>)}</div>
+          </div>
+        )}
+        <InfoBox label="Backup til din computer">
+          Den krypterede backup kan kun åbnes med din adgangskode og 2FA. Pak den ud med <code>node scripts/unpack-backup.mjs fil.json ~/Documents/FinstateBackup</code>
+          og åbn den med <code>FINSTATE_DIR=~/Documents/FinstateBackup npm start</code>. Kører Finstate på en Raspberry Pi, kan du også hente hele den krypterede mappe
+          med <code>scripts/backup-from-pi.sh</code> (se <code>deploy/RASPBERRY-PI.md</code>).
+        </InfoBox>
       </div>
     </div>
   );

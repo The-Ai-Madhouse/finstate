@@ -1,16 +1,44 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
+import { AuthGate, Login } from './ui/components/AuthGate';
+import { flushSave, useStore } from './store/store';
 import './styles.css';
 
-import { useEffect, useState } from 'react';
-import { useStore } from './store/store';
-
-/** Vis først appen, når data er indlæst fra datafilen (eller browseren) – så intet tomt kan blive gemt oven i. */
+/**
+ * Opstart: login (2FA) → indlæs de krypterede data → vis appen.
+ * Udløber login'et undervejs, vises login igen ovenpå – ændringer gemmes, når man er logget ind.
+ */
 function Boot() {
-  const [ready, setReady] = useState(() => useStore.persist.hasHydrated());
-  useEffect(() => (ready ? undefined : useStore.persist.onFinishHydration(() => setReady(true))), [ready]);
-  return ready ? <App /> : <div className="boot">Indlæser dine data …</div>;
+  const [phase, setPhase] = useState<'auth' | 'loading' | 'ready' | 'error'>('auth');
+  const [error, setError] = useState<string>();
+  const authLost = useStore((s) => s.authLost);
+  const load = async () => {
+    setPhase('loading');
+    try {
+      await useStore.persist.rehydrate();
+      if (useStore.getState().authLost) { setPhase('auth'); useStore.setState({ authLost: false }); return; }
+      setPhase(useStore.persist.hasHydrated() ? 'ready' : 'error');
+    } catch (e) {
+      setError((e as Error).message);
+      setPhase('error');
+    }
+  };
+  useEffect(() => { if (phase === 'error' && !error) setError('Data kunne ikke indlæses.'); }, [phase, error]);
+
+  if (phase === 'auth') return <AuthGate onReady={load} />;
+  if (phase === 'loading') return <div className="boot">Låser dine data op …</div>;
+  if (phase === 'error') return <div className="boot">Kunne ikke indlæse dine data: {error} <button className="btn sm" onClick={load}>Prøv igen</button></div>;
+  return (
+    <>
+      <App />
+      {authLost && (
+        <div className="auth-overlay">
+          <Login again onDone={() => { useStore.setState({ authLost: false }); flushSave(); }} />
+        </div>
+      )}
+    </>
+  );
 }
 
 createRoot(document.getElementById('root')!).render(

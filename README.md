@@ -8,17 +8,21 @@ npm start        # åbner http://127.0.0.1:5173
 npm test         # tests af regnskabsmotoren
 ```
 
-> **Data gemmes i en fil på din computer**: `~/Documents/Finstate/finstate.json` (en anden mappe med
-> `FINSTATE_DIR=/sti/til/mappe npm start` – altid uden for projektet). Filen skrives, mens `npm start` kører;
-> browseren har kun en kopi og bruges som nødløsning, hvis serveren ikke kører. Første gang flyttes browserens data over i filen.
+> **Login med 2FA og kryptering.** Første gang vælger du en adgangskode og tilføjer Finstate i en 2FA-app
+> (Google Authenticator, 1Password …). Login holder i 4 uger pr. enhed. Data gemmes **krypteret** (AES-256-GCM) i
+> `~/Documents/Finstate/` (anden mappe: `FINSTATE_DIR=/sti npm start` – altid uden for projektet) og kan kun låses
+> op med adgangskode + 2FA. Glemmer du adgangskoden, kan data ikke gendannes.
 >
 > **Versioner** (knappen øverst): gem en navngiven milepæl, se hvad der er ændret siden, og gå tilbage.
-> Versionerne ligger i `~/Documents/Finstate/versions/`.
+>
+> **Raspberry Pi:** `npm run build && npm run serve` kører Finstate som selvstændig server. Se
+> [deploy/RASPBERRY-PI.md](deploy/RASPBERRY-PI.md) for sikker opsætning med Tailscale (HTTPS, ingen åbne porte),
+> systemd og backup til din computer (`scripts/backup-from-pi.sh`).
 
 ## Privatliv
 - Ingen server, intet login, ingen analytics. En Content-Security-Policy i `index.html` forhindrer siden i at
   sende data nogen steder hen (kun dev-serverens egen websocket er tilladt).
-- Data ligger i en fil på din computer (se ovenfor), med en kopi i browserens `localStorage` (nøgle `finstate:v1`). Den lokale server svarer kun Finstate selv (127.0.0.1, Host/Origin tjekkes) og nægter en datamappe inde i projektet. Backupfiler indeholder bankdata – `.gitignore` udelukker `*.csv` og backups.
+- Data ligger krypteret i datamappen – intet gemmes i browseren. Serveren svarer kun Finstate selv (127.0.0.1 eller navne i `FINSTATE_ALLOWED_HOSTS`; Host/Origin tjekkes), kræver login til alt andet end selve login'et, spærrer efter gentagne forkerte forsøg og nægter en datamappe inde i projektet. Ukrypterede eksporter indeholder bankdata – `.gitignore` udelukker `*.csv` og backups.
 - Demodata og eksempelkategorier er opdigtede. En lokal pre-commit-hook (`scripts/pre-commit`) kan blokere egne
   private ord fra en ikke-versioneret `.private-terms`-fil.
 

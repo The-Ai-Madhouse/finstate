@@ -1,0 +1,41 @@
+# systemd-tjeneste til Finstate på en Raspberry Pi.  Installér: se deploy/RASPBERRY-PI.md
+[Unit]
+Description=Finstate (krypteret, kun tilgængelig via Tailscale)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=finstate
+Group=finstate
+WorkingDirectory=/opt/finstate
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=5173
+Environment=FINSTATE_DIR=/var/lib/finstate/data
+# Sæt dit Tailscale-navn her (det, du åbner siden med):
+Environment=FINSTATE_ALLOWED_HOSTS=finstate.DIT-TAILNET.ts.net
+ExecStart=/usr/bin/node --experimental-strip-types --no-warnings server/main.ts
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+# Hærdning: tjenesten kan kun skrive i sin datamappe og har ingen ekstra rettigheder.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/finstate
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

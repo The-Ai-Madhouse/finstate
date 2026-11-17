@@ -3,7 +3,6 @@ import { NEEDS_REVIEW } from '../domain/classify';
 import { inPeriod } from '../domain/engine';
 import { useEngine, usePeriod } from '../store/actions';
 import { useStore, type View } from '../store/store';
-import { exportBackup } from './backup';
 import { VERSION_DETAILS, VERSION_LABEL } from '../version';
 import { ViewHelp, nextStepOf, useGuide } from './components/Guide';
 import { BalanceView } from './views/BalanceView';
@@ -77,7 +76,7 @@ export function App() {
           <NavItem id="settings" label="Indstillinger" icon={<span className="step">⚙</span>} />
         </div>
         <div className="nav-foot">
-          Data forlader aldrig din computer. {saveMode === 'file' ? 'Gemmes i en fil på computeren.' : 'Gemmes kun i denne browser – start med npm start.'}
+          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : 'Krypteret og kræver login med 2FA.'}
           <div className="nav-version" title={VERSION_DETAILS}>{VERSION_LABEL}</div>
         </div>
       </nav>
@@ -114,14 +113,10 @@ function NavItem({ id, label, icon, extra, title, disabled }: { id: View; label:
 }
 
 function TopBar() {
-  const data = useStore((s) => s.data);
   const storageError = useStore((s) => s.storageError);
   const save = useStore((s) => s.saveStatus);
   const setView = useStore((s) => s.setView);
   const period = usePeriod();
-  const { lastExportAt, lastChangeAt } = data.settings;
-  const dirty = !!lastChangeAt && (!lastExportAt || lastChangeAt > lastExportAt);
-  const days = lastExportAt ? Math.floor((Date.now() - Date.parse(lastExportAt)) / 86400000) : null;
   return (
     <>
       <div className="topbar">
@@ -130,16 +125,12 @@ function TopBar() {
           : <span className="crumb muted">Intet financial statement valgt</span>}
         <span className="spacer" />
         {save.mode === 'file'
-          ? <span className="chip user" title={`Gemmes automatisk i ${save.dir}/finstate.json${save.savedAt ? ` · senest ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>💾 Gemt på computeren</span>
-          : save.mode === 'browser' ? <span className="chip review" title={save.error}>⚠ Kun i browseren</span> : null}
+          ? <span className="chip user" title={`Krypteret (AES-256) i ${save.dir}/finstate.json${save.savedAt ? ` · senest gemt ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>🔒 Krypteret og gemt</span>
+          : save.mode === 'error' ? <span className="chip review" title={save.error}>⚠ Ikke gemt</span> : null}
         <button className="btn sm" onClick={() => setView('versions')} title="Gem en version (milepæl), se ændringer siden – og gå tilbage">🕘 Versioner</button>
-        <span className={`chip ${dirty && data.txs.length && save.mode !== 'file' ? 'review' : ''}`} title={lastExportAt ? `Sidste backup ${lastExportAt}` : 'Ingen backup endnu'}>
-          {dirty ? (days === null ? 'Ingen backup endnu' : `Ændringer siden backup (${days} d.)`) : 'Backup er opdateret'}
-        </span>
-        <button className={`btn sm ${dirty && data.txs.length && save.mode !== 'file' ? 'primary' : ''}`} onClick={() => exportBackup('full')}>Eksportér backup</button>
       </div>
       {storageError && <div className="banner error" style={{ margin: '12px 24px 0' }}>{storageError}</div>}
-      {save.mode === 'browser' && save.error && <div className="banner warn" style={{ margin: '12px 24px 0' }}>{save.error}</div>}
+      {save.mode === 'error' && save.error && <div className="banner warn" style={{ margin: '12px 24px 0' }}>{save.error}</div>}
     </>
   );
 }

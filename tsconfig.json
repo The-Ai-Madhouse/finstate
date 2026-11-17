@@ -12,7 +12,9 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["vite/client", "node"]
   },
   "include": ["src", "server", "vite.config.ts"]
 }
