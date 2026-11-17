@@ -24,16 +24,16 @@ export function deleteStatement(id: string) {
       slideNotes,
     };
   });
-  if (periodId === id) setPeriod(undefined);
+  if (periodId === id) setPeriod(undefined, { replace: true });
 }
 
 /** Opretter perioden (hvis den ikke findes) og gør den til det aktuelle financial statement. */
 export function startStatement(p: Period) {
-  const { update, setPeriod, setView, data } = useStore.getState();
+  const { update, goTo, data } = useStore.getState();
   const existing = data.periods.find((x) => x.start === p.start && x.end === p.end);
   if (!existing) update((d) => withNewPeriod(d, p));
-  setPeriod(existing?.id ?? p.id);
-  setView('overview');
+  // Ét skridt i historikken: nyt financial statement + Overblik.
+  goTo({ view: 'overview', periodId: existing?.id ?? p.id });
 }
 
 /** Formular: vælg år. Et financial statement er altid årligt – også mens året er i gang. */

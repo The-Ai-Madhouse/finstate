@@ -1,6 +1,6 @@
 import { clsOfLine } from '../../domain/classify';
 import { NoPeriod } from '../components/PeriodPrompt';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import type { Account, Classification, Period, Tx } from '../../domain/types';
@@ -12,6 +12,7 @@ import { pairBank, setManual, unpairTxs, useEngine, usePeriod } from '../../stor
 import { useStore } from '../../store/store';
 import { AccountSelect, ClassEditor, Empty, InfoBox, Money, SearchCombo, isComplete } from '../components/common';
 import { SettleOverview, setPostSettle } from '../components/SettlePanel';
+import { useFocusIntent } from '../components/NavFocus';
 import { isSettled } from '../../domain/settle';
 
 export function TransfersView() {
@@ -75,18 +76,17 @@ function Internal() {
   const [editing, setEditing] = useState<string>();
   // Kommer man fra Aktiver & passiver: vis én overførsel eller alle for en post.
   const [onlyTx, setOnlyTx] = useState<string>();
-  const focus = useStore((st) => st.transferFocus);
   const cardRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!focus || focus.settle) return; // Afstemning håndterer sit eget fokus
+  // Linket hertil (en overførsel, en kontos overførsler, "mangler modpost"): vis listen sådan, at målet kan ses.
+  useFocusIntent('transfers', (f) => {
+    if (!f.key?.startsWith('xfer:')) return;
+    const c = f.ctx?.transfers ?? {};
     setFolded(false);
-    setStatus('all');
+    setStatus(c.status ?? 'all');
     setQ('');
-    setAccountId(focus.txId ? undefined : focus.accountId);
-    setOnlyTx(focus.txId);
-    useStore.getState().clearTransferFocus();
-    setTimeout(() => cardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
-  }, [focus]);
+    setAccountId(c.accountId);
+    setOnlyTx(c.onlyTx);
+  });
   // Listen kan fylde meget – den kan foldes sammen (huskes i browseren).
   const [folded, setFolded] = useState(() => { try { return localStorage.getItem('finstate:ui:xfer-folded') === '1'; } catch { return false; } });
   const toggleFold = () => setFolded((f) => { try { localStorage.setItem('finstate:ui:xfer-folded', f ? '0' : '1'); } catch { /* ignore */ } return !f; });
@@ -122,7 +122,7 @@ function Internal() {
   ];
 
   return (
-    <div className="card" ref={cardRef}>
+    <div className="card" ref={cardRef} data-focus="xfer:card">
       <div className="card-head">
         <button className="fold-head grow" onClick={toggleFold} aria-expanded={!folded}>
           <span className={`caret ${folded ? '' : 'open'}`} aria-hidden>›</span>
@@ -177,7 +177,8 @@ function Internal() {
             const out = i.kind === 'pair' || i.t.amount < 0;
             const t = i.kind === 'pair' ? undefined : i.t;
             return (
-              <div key={i.key} className={`xfer-item ${i.kind} ${editing === i.key ? 'editing' : ''}`}>
+              <div key={i.key} className={`xfer-item ${i.kind} ${editing === i.key ? 'editing' : ''}`}
+                data-focus={[...txsOf(i).map((x) => `xfer:${x.id}`), i.kind === 'transit' && `xfer:${i.partner.id}`, i.kind === 'missing' && 'xfer:missing', i.kind === 'transit' && 'xfer:transit'].filter(Boolean).join(' ')}>
                 <div className="xfer-row">
                   {i.kind === 'pair' ? side(i.out) : out ? side(t!)
                     : i.kind === 'transit' ? expected(acc(i.partner.accountId)?.name, `sendt ${dateShort(i.partner.date)} – i forrige periode`)

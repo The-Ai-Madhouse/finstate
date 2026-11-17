@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { AuthGate, Login } from './ui/components/AuthGate';
-import { flushSave, useStore } from './store/store';
+import { flushSave, initHistory, useStore } from './store/store';
 import './styles.css';
 
 /**
@@ -18,6 +18,8 @@ function Boot() {
     try {
       await useStore.persist.rehydrate();
       if (useStore.getState().authLost) { setPhase('auth'); useStore.setState({ authLost: false }); return; }
+      // Adresselinjen (#/side) bestemmer siden – og browserens frem/tilbage virker herfra.
+      if (useStore.persist.hasHydrated()) initHistory();
       setPhase(useStore.persist.hasHydrated() ? 'ready' : 'error');
     } catch (e) {
       setError((e as Error).message);

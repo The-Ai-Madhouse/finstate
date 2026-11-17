@@ -11,6 +11,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import QRCode from 'qrcode';
 import type { Plugin } from 'vite';
@@ -46,7 +47,8 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 async function writeAtomic(file: string, text: string) {
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  // Unikt navn, så to samtidige gemninger ikke deler samme midlertidige fil.
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
   await writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
   await rename(tmp, file);
 }

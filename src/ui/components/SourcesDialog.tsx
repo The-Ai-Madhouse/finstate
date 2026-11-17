@@ -21,7 +21,7 @@ export function SourcesDialog({ title, refs, kind, period, onClose }: {
 }) {
   const e = useEngine();
   const { data } = e;
-  const { showTx, setView } = useStore.getState();
+  const { showTx, showPost } = useStore.getState();
   const src = plSources(data, e.ledger, period, refs);
   // Vis beløb som i regnskabet: indtægter positive, udgifter positive (refusion negativ).
   const show = (v: number) => (kind === 'income' ? v : -v);
@@ -63,7 +63,7 @@ export function SourcesDialog({ title, refs, kind, period, onClose }: {
                       <td className="num small">{kr(sign * v.valueFrom)} → {kr(sign * v.valueTo)}<div className="muted">{(v.valueTo - v.valueFrom) * sign >= 0 ? '+' : '−'}{kr(Math.abs(v.valueTo - v.valueFrom))}</div></td>
                       <td className="num small">{v.transfers ? `${v.transfers * sign > 0 ? '−' : '+'}${kr(Math.abs(v.transfers))}` : '0 kr'}</td>
                       <td className="num"><b><Money v={show(v.amount)} /></b></td>
-                      <td className="num"><button className="btn sm ghost" onClick={() => { onClose(); setView('balance'); }}>Se i balancen →</button></td>
+                      <td className="num"><button className="btn sm ghost" onClick={() => { onClose(); showPost(v.accountId, 'change'); }}>Se i balancen →</button></td>
                     </tr>
                   );
                 })}
@@ -238,7 +238,7 @@ export function BalanceSourcesDialog({ refKey, label, side, period, view = 'peri
           <div className="row small" style={{ marginTop: 8 }}>
             <span className="ink2">Interne overførsler på {label} kan parres, ophæves og rettes samlet på Overførsler-siden.</span>
             <span className="spacer" />
-            <button className="btn sm" onClick={() => { onClose(); useStore.getState().showTransfers({ accountId: ownAccountId }); }}>Alle overførsler for {label} →</button>
+            <button className="btn sm" onClick={() => { onClose(); useStore.getState().showTransfers({ accountId: ownAccountId, status: 'all' }); }}>Alle overførsler for {label} →</button>
           </div>
         )}
 

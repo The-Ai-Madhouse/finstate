@@ -1,6 +1,6 @@
 import { TRANSFER_LABEL, postMovements, transferInfo, type TransferKind } from '../../domain/transfers';
 import { NoPeriod } from '../components/PeriodPrompt';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useState } from 'react';
 import { KIND_HINT, KIND_LABEL, NO_TYPE, noteFor, suggestCategory, switchKind, typeName, withAccountInPeriods, withValuation } from '../../domain/accountTypes';
 import { dateShort, kr } from '../../domain/format';
 import type { BsRow } from '../../domain/ledger';
@@ -8,6 +8,7 @@ import type { Account, Period, Valuation } from '../../domain/types';
 import { addDays, uid } from '../../domain/util';
 import { deleteAccount, deleteImpact, moveAccount, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
+import { useFocusIntent } from '../components/NavFocus';
 import { AccountNote, AmountInput, CategoryCombo, KindSelect, Money, ResultParts, SearchCombo, TypeSelect, InfoBox } from '../components/common';
 import { valuationResultInPeriod } from '../../domain/ledger';
 import { BalanceSourcesDialog } from '../components/SourcesDialog';
@@ -46,16 +47,15 @@ let dragging: { id: string; side: Account['side'] } | undefined;
 function BalanceSheet({ period }: { period: Period }) {
   const e = useEngine();
   const s = e.statement(period);
-  const setView = useStore((st) => st.setView);
   const [open, setOpen] = useState<string>();
-  // Kommer man fra Kategorisér eller Overførsler med en bestemt post: fold den ud og rul hen til den.
-  const focus = useStore((st) => st.balanceFocus);
-  useEffect(() => {
-    if (!focus) return;
-    setOpen(focus);
-    useStore.getState().clearBalanceFocus();
-    setTimeout(() => document.querySelector(`[data-postrow="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
-  }, [focus]);
+  // Kommer man fra Overblik, Kategorisér eller Overførsler med en bestemt post: fold den ud (rul og fremhæv klares af NavFocus).
+  useFocusIntent('balance', (f) => {
+    const id = f.ctx?.open;
+    if (!id) return;
+    if (s.rows.some((r) => r.ref === `acc:${id}`)) { setOpen(id); return; }
+    const acc = e.data.accounts.find((a) => a.id === id);
+    if (acc && !f.quiet) useStore.getState().setNavNotice({ text: `${acc.name} er ikke med i balancen for ${period.name}. Tilføj den med "+ Tilføj aktiv/passiv" – eller vælg den i Indstillinger → Poster.` });
+  });
   // Netop oprettet post: markøren skal stå i det felt, der skal udfyldes.
   const [justAdded, setJustAdded] = useState<string>();
   const [sources, setSources] = useState<SrcReq>();
@@ -90,13 +90,15 @@ function BalanceSheet({ period }: { period: Period }) {
                 );
               })}
               {autoRows.map((r) => (
-                <tr key={r.ref}>
+                <tr key={r.ref} data-focus={r.kind === 'cp' ? 'balance:cp' : 'balance:transit'}>
                   <td>{r.label}</td>
                   <td><span className="chip">{r.kind === 'cp' ? (r.side === 'asset' ? 'Tilgodehavende · udlæg' : 'Gæld · udlæg') : 'Penge undervejs'}</span></td>
                   <td className="num"><SrcAmount v={r.open * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'primo' })} /></td>
                   <td className="num"><SrcAmount v={r.close * sign(sd)} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
                   <td className="num ink2"><SrcAmount v={(r.close - r.open) * sign(sd)} signed colored inverted={sd === 'liability'} onOpen={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })} /></td>
-                  <td className="num"><button className="btn sm ghost" onClick={() => setView('transfers')}>{r.kind === 'cp' ? 'Se udlæg →' : 'Se overførsler →'}</button></td>
+                  <td className="num">{r.kind === 'cp'
+                    ? <button className="btn sm ghost" title="Se udlæggene, beløbet består af" onClick={() => setSources({ ref: r.ref, label: r.label, side: sd, view: 'period' })}>Se udlæg</button>
+                    : <button className="btn sm ghost" onClick={() => useStore.getState().showTransfers({ status: 'transit' })}>Se overførsler →</button>}</td>
                 </tr>
               ))}
               <AddRow side={sd} period={period} onAdded={(id) => { setOpen(id); setJustAdded(id); }} />
@@ -163,7 +165,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
   const hasTx = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
   return (
     <Fragment>
-      <tr data-postrow={acc.id} className={`click ${expanded ? 'expanded' : ''} ${over ? 'drop-over' : ''}`}
+      <tr data-postrow={acc.id} data-focus={`post:${acc.id}`} className={`click ${expanded ? 'expanded' : ''} ${over ? 'drop-over' : ''}`}
         onClick={(ev) => { if (!(ev.target as HTMLElement).closest('input,button,select,.drag-handle')) onToggle(); }}
         draggable={draggable}
         onDragStart={(ev) => { dragging = { id: acc.id, side: row.side }; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', acc.id); }}
@@ -177,10 +179,10 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
         <td><span className={`chip ${acc.typeId ? '' : 'muted'}`} title={`${KIND_LABEL[acc.kind]}. ${KIND_HINT[acc.kind]}`}>{typeName(e.data.accountTypes, acc)}</span></td>
         {manual ? (
           <>
-            <td className="num" style={{ width: 150 }}>
+            <td className="num" style={{ width: 150 }} data-focus={`post:${acc.id}:primo`} data-focus-field="">
               <AmountInput className="sm" value={vPrimo ? vPrimo.value * inSign : undefined} placeholder={kr(row.open * inSign)} onCommit={(v) => upsert(primoDate, v)} ariaLabel={`${acc.name} primo`} />
             </td>
-            <td className="num" style={{ width: 150 }}>
+            <td className="num" style={{ width: 150 }} data-focus={`post:${acc.id}:ultimo`} data-focus-field="">
               <AmountInput className={`sm ${missing ? 'missing' : ''}`} value={vUltimo ? vUltimo.value * inSign : undefined} placeholder="angiv værdi" onCommit={(v) => upsert(period.end, v)} ariaLabel={`${acc.name} ultimo`} autoFocus={justAdded} />
             </td>
           </>
@@ -204,7 +206,6 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
   const [newAdj, setNewAdj] = useState<string>();
   const e = useEngine();
   const { data } = e;
-  const setView = useStore((s) => s.setView);
   const { patchAccount, patchValuation } = useValuationActions(acc);
   const update = useStore((s) => s.update);
   const [aliases, setAliases] = useState(acc.aliases.join(', '));
@@ -261,14 +262,14 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
             <TrackedOpening acc={acc} autoFocus={focusOpening} />
           ) : acc.kind === 'bank' ? (
             <>
-              <label className="field">Åbningssaldo (kun hvis den ikke kan udledes af filen)
+              <label className="field" data-focus={`post:${acc.id}:opening`} data-focus-field="">Åbningssaldo (kun hvis den ikke kan udledes af filen)
                 <AmountInput className="sm" value={acc.openingBalance} placeholder="automatisk" onCommit={(v) => patchAccount({ openingBalance: v })} ariaLabel="Åbningssaldo" />
               </label>
-              <div><button className="btn sm" onClick={() => setView('import')}>Importér transaktioner →</button></div>
+              <div><button className="btn sm" onClick={() => useStore.getState().goTo({ view: 'import', key: `import:cover:${acc.id}` })}>Importér transaktioner →</button></div>
             </>
           ) : (
             <>
-              <label className="field">Uforklaret ændring bogføres som
+              <label className="field" data-focus={`post:${acc.id}:category`} data-focus-field="">Uforklaret ændring bogføres som
                 <CategoryCombo className="sm" value={acc.defaultCategoryId} allowClear="Ukategoriseret" onChange={(c) => patchAccount({ defaultCategoryId: c })} />
               </label>
               {!acc.defaultCategoryId && <span className="small neg">Vælg en kategori – ellers står ændringen som ukategoriseret.</span>}
@@ -278,7 +279,7 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
         </section>
 
         {acc.kind === 'valuation' && (
-          <section className="drawer-sec full">
+          <section className="drawer-sec full" data-focus={`post:${acc.id}:change`}>
             <h4>Ændringen i {period.name}</h4>
             {vUltimo && prev && residual !== undefined ? (
               <table className="small" style={{ maxWidth: 680 }}>
@@ -316,7 +317,7 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
         </section>
 
         {acc.kind === 'tracked' && (
-          <section className="drawer-sec full">
+          <section className="drawer-sec full" data-focus={`post:${acc.id}:settle`}>
             <h4>Afstemning i {period.name}</h4>
             <SettleToggle acc={acc} />
           </section>
@@ -336,7 +337,6 @@ function AccountDetails({ acc, period, focusOpening }: { acc: Account; period: P
 function AddRow({ side, period, onAdded }: { side: 'asset' | 'liability'; period: Period; onAdded: (id: string) => void }) {
   const data = useStore((s) => s.data);
   const update = useStore((s) => s.update);
-  const setView = useStore((s) => s.setView);
   const [active, setActive] = useState(false);
   const [typeId, setTypeId] = useState<string>();
   const [name, setName] = useState('');
@@ -370,7 +370,7 @@ function AddRow({ side, period, onAdded }: { side: 'asset' | 'liability'; period
               <SearchCombo className="sm" options={missing.map((a) => ({ id: a.id, label: a.name }))} value={undefined} onChange={(id) => id && addExisting(id)}
                 placeholder="Tilføj eksisterende post…" searchPlaceholder="Søg post…" ariaLabel="Tilføj eksisterende post" emptyText="Ingen post matcher" />
             )}
-            {side === 'asset' && <span className="small muted">Bankkonti oprettes, når du <button className="linkish" onClick={() => setView('import')}>importerer</button> deres transaktioner.</span>}
+            {side === 'asset' && <span className="small muted">Bankkonti oprettes, når du <button className="linkish" onClick={() => useStore.getState().goTo({ view: 'import', key: 'import:drop' })}>importerer</button> deres transaktioner.</span>}
           </div>
         </td>
       </tr>
@@ -413,7 +413,7 @@ function Opening() {
       </InfoBox>
       {firstPeriod && addDays(bookStart, 1) !== firstPeriod.start && <p className="small neg" style={{ marginBottom: 8 }}>Tip: første periode starter {firstPeriod.start} – bogføringsstart bør typisk være {addDays(firstPeriod.start, -1)}.</p>}
       <div className="row" style={{ marginBottom: 12 }}>
-        <label className="field">Bogføringsstart {data.settings.bookStartSet ? '(valgt af dig)' : '(automatisk ud fra dine data)'}
+        <label className="field" data-focus="balance:bookstart" data-focus-field="">Bogføringsstart {data.settings.bookStartSet ? '(valgt af dig)' : '(automatisk ud fra dine data)'}
           <input type="date" value={bookStart} onChange={(ev) => ev.target.value && update((d) => ({ ...d, settings: { ...d.settings, bookStart: ev.target.value, bookStartSet: true } }))} />
         </label>
         {data.settings.bookStartSet && (
@@ -452,7 +452,7 @@ function TrackedOpening({ acc, autoFocus }: { acc: Account; autoFocus?: boolean 
       return { ...d, openItems: [...rest, { id: item?.id ?? uid('oi'), date: bookStart, counterparty: acc.name, accountId: acc.id, amount: sign * v }] };
     });
   return (
-    <label className="field">Saldo ved bogføringsstart ({bookStart})
+    <label className="field" data-focus={`post:${acc.id}:opening`} data-focus-field="">Saldo ved bogføringsstart ({bookStart})
       <AmountInput className="sm" value={item ? item.amount * sign : undefined} placeholder="0" onCommit={set} ariaLabel="Startsaldo" autoFocus={autoFocus} />
     </label>
   );
@@ -499,6 +499,11 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
   }
   const total = counts.pair + counts.transit + counts.direct + counts.missing;
   const [all, setAll] = useState(false);
+  // Kommer man for at se en bestemt bevægelse, der ligger efter de første 6: vis dem alle.
+  useFocusIntent('balance', (f) => {
+    const pre = `post:${acc.id}:move:`;
+    if (f.key?.startsWith(pre) && !moves.slice(0, 6).some((t) => f.key === pre + t.id)) setAll(true);
+  });
   // Poster, der ikke er importerede bankkonti (fx en person eller et lån): vis bevægelserne – de hører sammen via posten.
   const imported = acc.kind === 'bank' && e.data.txs.some((t) => t.accountId === acc.id);
   // Afstemte poster viser bevægelserne i afstemningen nedenfor.
@@ -519,7 +524,7 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
               // Postens side af bevægelsen: penge ud fra banken = posten stiger (fx Jonas skylder mere).
               const v = -(e.resolved.get(t.id)!.lines.filter((l) => l.type === 'internal' && l.targetAccountId === acc.id).reduce((s, l) => s + l.amount, 0));
               return (
-                <tr key={t.id}>
+                <tr key={t.id} data-focus={`post:${acc.id}:move:${t.id}`}>
                   <td className="muted" style={{ whiteSpace: 'nowrap' }}>{dateShort(t.date)}</td>
                   <td className="muted">{accName(t.accountId)}</td>
                   <td className="ellipsis" style={{ maxWidth: 320 }}><button className="linkish" title="Åbn i Kategorisér" onClick={() => showTx(t.id)}>{t.text}</button>{t.memo && <span className="muted"> · ✎ {t.memo}</span>}</td>
@@ -536,7 +541,7 @@ function AccountTransfers({ acc, period }: { acc: Account; period: Period }) {
           <span key={k} className={`chip ${k === 'pair' ? 'user' : k === 'missing' ? 'review' : ''}`} title={TIP[k]}>{k === 'pair' ? '⇄ ' : ''}{counts[k]} {TRANSFER_LABEL[k].toLowerCase()}</span>
         ))}
         <span className="spacer" />
-        {total > 0 && <button className="btn sm" onClick={() => showTransfers({ accountId: acc.id })}>Se og ret i Overførsler →</button>}
+        {total > 0 && <button className="btn sm" onClick={() => showTransfers({ accountId: acc.id, status: counts.missing ? 'missing' : 'all' })}>Se og ret i Overførsler →</button>}
       </div>
     </section>
   );

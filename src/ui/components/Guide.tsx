@@ -5,6 +5,7 @@ import { defaultCategories } from '../../domain/defaults';
 import type { Period } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
 import { useStore, type View } from '../../store/store';
+import type { NavTarget } from '../../domain/nav-target';
 
 type Status = 'done' | 'todo' | 'waiting';
 
@@ -16,6 +17,8 @@ export interface GuideStep {
   view: View;
   /** Fane i Indstillinger, hvis trinnet hører til en bestemt fane. */
   tab?: string;
+  /** "Gå til" fører hen til det første, der mangler i trinnet – og fremhæver det. */
+  target?: NavTarget;
   title: string;
   help: ReactNode;
   status: Status;
@@ -126,6 +129,19 @@ function buildSteps(e: Engine, period: Period | undefined, update: ReturnType<ty
       status: 'waiting',
     },
   ];
+  // Mål for "Gå til": den vigtigste kontrol, der ikke er OK på trinnets side – ellers det oplagte sted at starte.
+  const RANK = { error: 0, warn: 1, info: 2, ok: 3 } as const;
+  const firstOpen = (view: View, ids?: RegExp) => checks
+    .filter((c) => c.level !== 'ok' && c.target?.view === view && (!ids || ids.test(c.id)))
+    .sort((a, b) => RANK[a.level] - RANK[b.level])[0]?.target;
+  const defaults: Record<string, NavTarget | undefined> = {
+    categories: data.categories.length ? undefined : { view: 'settings', tab: 'categories', key: 'settings:categories:seed' },
+    import: firstOpen('import') ?? (uncovered[0] ? { view: 'import', key: `import:cover:${uncovered[0].accountId}`, reason: `Mangler data: ${uncovered[0].name}` } : coverage.length ? undefined : { view: 'import', key: 'import:drop' }),
+    ledger: review ? firstOpen('ledger', /^review$/) : firstOpen('ledger'),
+    transfers: firstOpen('transfers'),
+    balance: firstOpen('balance', /^(val|bal|w|uncat-post)-/) ?? (period && !missingVal.length && !period.balanceConfirmed && data.accounts.length ? { view: 'balance', key: 'balance:confirm' } : undefined),
+  };
+  for (const st of steps) if (st.status !== 'done' && defaults[st.id]) st.target = defaults[st.id];
   let n = 0;
   const numbered = steps.map((s) => ({ ...s, n: s.group === 'statement' ? ++n : 0 }));
   const result = numbered.find((s) => s.group === 'result')!;
@@ -148,6 +164,8 @@ export function GuideCard() {
   const steps = useGuide();
   const period = usePeriod();
   const setView = useStore((s) => s.setView);
+  const goTo = useStore((s) => s.goTo);
+  const open = (s: GuideStep) => (s.target ? goTo(s.target) : setView(s.view, s.tab));
   const work = steps.filter((s) => s.group === 'statement');
   const setup = steps.filter((s) => s.group === 'setup' && s.status !== 'done');
   const result = steps.find((s) => s.group === 'result')!;
@@ -168,8 +186,8 @@ export function GuideCard() {
         <div className="row" style={{ flexWrap: 'nowrap' }}>
           {isNext && s.action && <button className="btn sm primary" onClick={s.action.run}>{s.action.label}</button>}
           {isNext
-            ? <button className={`btn sm ${s.action ? '' : 'primary'}`} onClick={() => setView(s.view, s.tab)}>{nothingDone && s.group === 'statement' ? 'Start her →' : 'Gå til →'}</button>
-            : <button className="btn sm ghost" onClick={() => setView(s.view, s.tab)}>{s.status === 'done' ? 'Åbn' : 'Gå til'}</button>}
+            ? <button className={`btn sm ${s.action ? '' : 'primary'}`} onClick={() => open(s)}>{nothingDone && s.group === 'statement' ? 'Start her →' : 'Gå til →'}</button>
+            : <button className="btn sm ghost" onClick={() => open(s)}>{s.status === 'done' ? 'Åbn' : 'Gå til'}</button>}
         </div>
       </div>
     );
@@ -215,9 +233,13 @@ export function ViewHelp({ view }: { view: View }) {
   const nextStep = step.group === 'statement' ? work.find((s) => s.n > step.n) ?? steps.find((s) => s.group === 'result') : undefined;
   if (hidden.includes(view)) {
     return (
-      <button className="btn sm ghost help-toggle" onClick={() => update((d) => ({ ...d, settings: { ...d.settings, hiddenHelp: (d.settings.hiddenHelp ?? []).filter((v) => v !== view) } }))}>
-        ? Hvad skal jeg gøre her
-      </button>
+      <div className="row">
+        {/* Trinnets handling (fx "Balancen er komplet ✓") skal kunne nås – også når hjælpen er skjult. */}
+        {step.action && <button className="btn sm primary" data-focus={step.id === 'balance' ? 'balance:confirm' : undefined} onClick={step.action.run}>{step.action.label}</button>}
+        <button className="btn sm ghost help-toggle" onClick={() => update((d) => ({ ...d, settings: { ...d.settings, hiddenHelp: (d.settings.hiddenHelp ?? []).filter((v) => v !== view) } }))}>
+          ? Hvad skal jeg gøre her
+        </button>
+      </div>
     );
   }
   const heading = step.group === 'setup' ? `Opsætning (én gang): ${step.title}`
@@ -233,8 +255,8 @@ export function ViewHelp({ view }: { view: View }) {
           {step.detail && <div className="small" style={{ marginTop: 4 }}>{step.detail}</div>}
         </div>
         <div className="col" style={{ alignItems: 'flex-end' }}>
-          {step.action && <button className="btn sm primary" onClick={step.action.run}>{step.action.label}</button>}
-          {step.status === 'done' && nextStep && <button className="btn sm primary" onClick={() => setView(nextStep.view, nextStep.tab)}>Næste: {nextStep.group === 'result' ? 'Resultat' : nextStep.title} →</button>}
+          {step.action && <button className="btn sm primary" data-focus={step.id === 'balance' ? 'balance:confirm' : undefined} onClick={step.action.run}>{step.action.label}</button>}
+          {step.status === 'done' && nextStep && <button className="btn sm primary" onClick={() => (nextStep.target ? useStore.getState().goTo(nextStep.target) : setView(nextStep.view, nextStep.tab))}>Næste: {nextStep.group === 'result' ? 'Resultat' : nextStep.title} →</button>}
           <button className="btn sm ghost" onClick={() => update((d) => ({ ...d, settings: { ...d.settings, hiddenHelp: [...(d.settings.hiddenHelp ?? []), view] } }))}>Skjul</button>
         </div>
       </div>

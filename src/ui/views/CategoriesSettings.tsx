@@ -25,7 +25,7 @@ export function CategoriesSettings() {
   const e = useEngine();
   const data = e.data;
   const update = useStore((s) => s.update);
-  const setView = useStore((s) => s.setView);
+  const showPost = useStore((s) => s.showPost);
   const period = usePeriod() ?? ALL;
   // Hvor man er ved at oprette: øverst i en kolonne (kind) eller under en kategori (parent).
   const [adding, setAdding] = useState<{ kind: Kind; parentId?: string }>();
@@ -71,7 +71,7 @@ export function CategoriesSettings() {
         <h2>Ingen kategorier endnu</h2>
         <p className="ink2" style={{ margin: '8px 0 12px' }}>Start med et eksempeltræ og ret det til – eller byg dit eget fra bunden.</p>
         <div className="row">
-          <button className="btn primary" onClick={() => update((d) => ({ ...d, categories: defaultCategories() }))}>Indsæt eksempeltræ</button>
+          <button className="btn primary" data-focus="settings:categories:seed" onClick={() => update((d) => ({ ...d, categories: defaultCategories() }))}>Indsæt eksempeltræ</button>
           {KINDS.map((k) => <button key={k} className="btn" onClick={() => setAdding({ kind: k })}>+ {k === 'both' ? 'Kategori der går begge veje' : `${TITLE[k].slice(0, -2)}skategori`}</button>)}
         </div>
         {adding && <AddRow kind={adding.kind} onAdd={(n) => create(adding.kind, n)} onClose={() => setAdding(undefined)} />}
@@ -116,9 +116,12 @@ export function CategoriesSettings() {
         </div>
         {vals.length > 0 && (
           <div className="cat-meta">
-            <button className="cat-unexplained" title="Kategorien tager den del af postens værdiændring, som dine overførsler ikke forklarer – klik for at se posten i Aktiver & passiver" onClick={() => setView('balance')}>
-              ↻ Uforklaret ændring på {vals.join(', ')}
-            </button>
+            {data.accounts.filter((a) => a.kind === 'valuation' && a.defaultCategoryId === c.id && !a.archived).map((a) => (
+              <button key={a.id} className="cat-unexplained" title="Kategorien tager den del af postens værdiændring, som dine overførsler ikke forklarer – klik for at se posten i Aktiver & passiver"
+                onClick={() => showPost(a.id, 'category')}>
+                ↻ Uforklaret ændring på {a.name}
+              </button>
+            ))}
           </div>
         )}
         {asking === c.id && <DeleteConfirm c={c} subs={subtree.length - 1} uses={total} unexplained={[...vals, ...subVals]} onYes={() => remove(c)} onNo={() => setAsking(undefined)} />}

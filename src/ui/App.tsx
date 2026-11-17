@@ -15,6 +15,7 @@ import { StatementView } from './views/StatementView';
 import { TransfersView } from './views/TransfersView';
 import { VersionsView } from './views/VersionsView';
 import { PairDialog } from './components/PairDialog';
+import { NavCallout, useNavFocus } from './components/NavFocus';
 
 /** Arbejdstrin: her skal brugeren gøre noget → nummer, der bliver til ✓. */
 const WORK: { id: View; label: string; n: number; steps: string[] }[] = [
@@ -45,9 +46,12 @@ export function App() {
   const reviewCount = period
     ? engine.data.txs.filter((t) => inPeriod(t, period) && t.date > engine.data.settings.bookStart && NEEDS_REVIEW.has(engine.resolved.get(t.id)!.source)).length
     : 0;
+  // "Gå til …": rul hen til målet og markér det tydeligt.
+  useNavFocus();
   return (
     <div className="app">
       <PairDialog />
+      <NavCallout />
       <nav className="nav" aria-label="Hovedmenu">
         <div className="brand">◐ Finstate <small>lokalt & privat</small></div>
         <StatementSwitcher />

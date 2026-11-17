@@ -61,7 +61,7 @@ function CoverageCard() {
           <thead><tr><th>Konto</th><th>Data fra</th><th>Data til</th><th>Dækker perioden</th></tr></thead>
           <tbody>
             {cov.map((c) => (
-              <tr key={c.accountId}>
+              <tr key={c.accountId} data-focus={`import:cover:${c.accountId}`}>
                 <td>{c.name}</td>
                 <td>{c.first ? dateDa(c.first) : '–'}</td>
                 <td>{c.last ? dateDa(c.last) : '–'}</td>
@@ -75,7 +75,7 @@ function CoverageCard() {
                     ) : (
                       <span className="row" style={{ gap: 6 }}>
                         <span className="chip review">{!c.first ? 'Ingen data' : !c.coversStart ? `Mangler data før ${c.first}` : `Mangler data efter ${c.last}`}</span>
-                        <button className="btn sm ghost" title="Fx hvis kontoen er lukket eller ikke har haft bevægelser – advarslen forsvinder for denne periode" onClick={() => setAccepted(c.accountId, true)}>Det er i orden</button>
+                        <button className="btn sm ghost" data-focus-input title="Fx hvis kontoen er lukket eller ikke har haft bevægelser – advarslen forsvinder for denne periode" onClick={() => setAccepted(c.accountId, true)}>Det er i orden</button>
                       </span>
                     )}
                 </td>
@@ -125,6 +125,8 @@ function ImportInner() {
       </InfoBox>
       <label
         className={`drop ${over ? 'over' : ''}`}
+        data-focus="import:drop" tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget.querySelector('input[type=file]') as HTMLInputElement | null)?.click(); } }}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
@@ -390,13 +392,21 @@ function AccountsSummary() {
               const o = all.filter((t) => inP(t.date));
               const breaks = c.breaks.filter((b) => inP(b.date));
               return (
-                <tr key={a.id}>
+                <tr key={a.id} data-focus={`import:summary:${a.id}`}>
                   <td>{a.name}</td>
                   <td className="num">{o.length}{all.length > o.length && <div className="small muted">{all.length} i alt</div>}</td>
                   <td>{o[0] ? dateDa(o[0].date) : '–'}</td>
                   <td>{o.length ? dateDa(o[o.length - 1].date) : '–'}</td>
                   <td className="num">{o.length && o[o.length - 1].balance !== undefined ? <Money precise v={o[o.length - 1].balance!} /> : '–'}</td>
-                  <td>{!o.length ? '–' : breaks.length ? <span className="chip review" title={breaks.map((b) => `${b.date}: ${kr(b.diff)}`).join('\n')}>{breaks.length} brud</span> : <span className="chip user">OK</span>}</td>
+                  <td>{!o.length ? '–' : breaks.length ? (
+                    <div className="col" style={{ gap: 2 }}>
+                      <span className="chip review" title="Saldoen i filen passer ikke med transaktionerne: der mangler transaktioner (eller er dubletter) lige før disse">{breaks.length} brud</span>
+                      {breaks.slice(0, 5).map((b) => (
+                        <button key={b.txId} className="linkish small" style={{ textAlign: 'left' }} title="Vis transaktionen, hvor saldokæden brydes" onClick={() => useStore.getState().showTx(b.txId)}>{dateDa(b.date)}: {kr(b.diff)} →</button>
+                      ))}
+                      {breaks.length > 5 && <span className="small muted">+ {breaks.length - 5} flere</span>}
+                    </div>
+                  ) : <span className="chip user">OK</span>}</td>
                   <td className="num">
                     {all.length > 0 && (
                       <button className="btn sm ghost danger" title="Sletter kontoens transaktioner i alle perioder" onClick={() => {

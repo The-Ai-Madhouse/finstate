@@ -517,7 +517,7 @@ const ICON: Record<Check['level'], string> = { ok: '✓', info: 'i', warn: '!', 
 const LEVEL_TXT: Record<Check['level'], string> = { ok: 'OK', info: 'Info', warn: 'Advarsel', error: 'Fejl' };
 
 export function CheckList({ checks }: { checks: Check[] }) {
-  const setView = useStore((s) => s.setView);
+  const goTo = useStore((s) => s.goTo);
   return (
     <div>
       {checks.map((c) => (
@@ -528,7 +528,7 @@ export function CheckList({ checks }: { checks: Check[] }) {
             {c.detail && <div className="small muted">{c.detail}</div>}
           </div>
           {c.view && c.level !== 'ok' && (
-            <button className="btn sm" onClick={() => setView(c.view as View)}>Gå til →</button>
+            <button className="btn sm" title="Gå til stedet, hvor det kan rettes – det bliver fremhævet" onClick={() => goTo(c.target ?? { view: c.view as View })}>Gå til →</button>
           )}
         </div>
       ))}
@@ -755,7 +755,7 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
           <span className="small muted">i alt <span className={sum === 0 ? 'pos' : ''}>{kr2f(sum)}{sum === 0 ? ' ✓' : ''}</span></span>
           {sum !== 0 && (restCat
             ? <span className="small">resten → <b>{categoryLabel(e.data.categories, restCat)}</b></span>
-            : !allInternal && <button className="tx-link-x" title="Vælg, hvor resten hører hjemme – under Afstemning" onClick={() => showTransfers({ settle: true })}>Placér resten →</button>)}
+            : !allInternal && <button className="tx-link-x" title="Vælg, hvor resten hører hjemme – under Afstemning" onClick={() => showTransfers({ settle: true, groupId: tx.link })}>Placér resten →</button>)}
           <button className="tx-link-x" title="Ophæv parringen for denne transaktion (kategorien bevares)" aria-label="Ophæv parring" onClick={() => update((d) => unlinkTx(d, tx.id))}>Ophæv</button>
         </div>
       )}
@@ -838,13 +838,13 @@ function TxRelations({ tx }: { tx: Tx }) {
             : <span key={m.key} className="small">{m.primo ? 'saldo primo' : m.text} {kr2f(m.amount)}</span>))}
         </>
       ) : <span className="chip review" title="Par den med det, den hører sammen med – fx udlægget og tilbagebetalingen">Ikke parret</span>}
-      <button className="tx-link-x" title="Par bevægelserne på posten – og afskriv en evt. difference" onClick={() => showTransfers({ settle: true, postId: target.id })}>{group ? 'Ret i Afstemning →' : 'Par i Afstemning →'}</button>
+      <button className="tx-link-x" title="Par bevægelserne på posten – og afskriv en evt. difference" onClick={() => showTransfers({ settle: true, postId: target.id, txId: tx.id })}>{group ? 'Ret i Afstemning →' : 'Par i Afstemning →'}</button>
     </div>
   );
   return (
     <div className="tx-rel" onKeyDown={(ev) => ev.stopPropagation()}>
       <span className="tx-rel-label" title="Direkte overførsel til en post – alle bevægelser på posten hører sammen">◆ Via posten</span>
-      <button className="linkish" title="Se posten i Aktiver & passiver" onClick={() => showPost(target.id)}>{target.name}</button>
+      <button className="linkish" title="Se posten og bevægelsen i Aktiver & passiver" onClick={() => showPost(target.id, `move:${tx.id}`)}>{target.name}</button>
       {others.length > 0
         ? <button className="tx-link-x" aria-expanded={open} onClick={() => setOpen(!open)}>{others.length} {others.length === 1 ? 'anden' : 'andre'} i {period.name} {open ? '▴' : '▾'}</button>
         : <span className="small muted">ingen andre i {period.name}</span>}

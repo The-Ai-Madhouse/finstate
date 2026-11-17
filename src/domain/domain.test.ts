@@ -1067,3 +1067,43 @@ describe('datamappe', () => {
     if (keep === undefined) delete process.env.FINSTATE_DIR; else process.env.FINSTATE_DIR = keep;
   });
 });
+
+describe('navigation: adresselinje og "Gå til"-mål', () => {
+  it('koder og læser adresselinjen – ukendte sider ignoreres', async () => {
+    const { decodeHash, encodeHash } = await import('./nav-target');
+    for (const r of [{ view: 'overview' as const }, { view: 'ledger' as const, periodId: 'p-2026' }, { view: 'settings' as const, tab: 'categories', periodId: 'p 1/ø' }]) {
+      expect(decodeHash(encodeHash(r))).toEqual(r);
+    }
+    expect(encodeHash({ view: 'balance', tab: 'categories' })).toBe('#/balance');
+    expect(decodeHash('#/hemmelig')).toBeUndefined();
+    expect(decodeHash('')).toBeUndefined();
+    expect(decodeHash('#/settings/ukendt')).toEqual({ view: 'settings' });
+  });
+
+  it('hver kontrol, der ikke er OK, har et mål med noget at fremhæve', () => {
+    const data = demoData();
+    // Gør demoen "ufærdig": fjern en værdi og en kategori, så flere kontroller slår ud.
+    const d = withAutoBookStart({ ...data, valuations: data.valuations.slice(1) });
+    const e = buildEngine(d);
+    for (const p of d.periods) {
+      for (const c of periodChecks(e, p).filter((x) => x.level !== 'ok' && x.id !== 'balance')) {
+        expect(c.target?.key, c.id).toBeTruthy();
+        expect(c.target?.view, c.id).toBe(c.view);
+        expect(c.target?.reason, c.id).toBe(c.title);
+      }
+    }
+  });
+
+  it('kontroller fører til den side, hvor det kan rettes', () => {
+    const d = demoData();
+    const e = buildEngine(d);
+    const p = d.periods[0];
+    const bad = periodChecks(e, { ...p, start: d.settings.bookStart });
+    expect(bad.find((c) => c.id === 'bookstart')?.target).toMatchObject({ view: 'balance', key: 'balance:bookstart' });
+    for (const c of periodChecks(e, p)) {
+      if (c.id === 'cp') expect(c.target?.view).toBe('balance');
+      if (c.id.startsWith('chain-')) expect(c.target?.view).toBe('import');
+      if (c.id.startsWith('val-')) expect(c.target?.key).toBe(`post:${c.id.slice(4)}:ultimo`);
+    }
+  });
+});

@@ -19,6 +19,9 @@ import { orderChain, bankBalanceAt, type ChainBreak } from './reconcile';
 import type { Account, AppData, Category, Period, Tx } from './types';
 import { addDays, groupBy } from './util';
 
+/** Advarsel om en post (værdikonto) – med posten, så "Gå til" kan finde den. */
+export interface LedgerWarning { accountId: string; kind: 'no-value' | 'first-after-bookstart'; text: string }
+
 export interface Posting {
   date: string;
   ref: string;
@@ -38,7 +41,7 @@ export interface Ledger {
   postings: Posting[];
   cpLabels: Map<string, string>;
   chains: Map<string, { ordered: Tx[]; breaks: ChainBreak[] }>;
-  warnings: string[];
+  warnings: LedgerWarning[];
 }
 
 export function buildLedger(data: AppData, resolved: Map<string, Resolved>): Ledger {
@@ -46,7 +49,7 @@ export function buildLedger(data: AppData, resolved: Map<string, Resolved>): Led
   const accounts = new Map(data.accounts.map((a) => [a.id, a]));
   const postings: Posting[] = [];
   const cpLabels = new Map<string, string>();
-  const warnings: string[] = [];
+  const warnings: LedgerWarning[] = [];
   const pl = (date: string, ref: string, amount: number, extra: Partial<Posting> = {}) =>
     amount !== 0 && postings.push({ date, ref, amount, ...extra });
   const cp = (name: string) => {
@@ -127,11 +130,11 @@ export function buildLedger(data: AppData, resolved: Map<string, Resolved>): Led
     const moved = (from: string, to: string) =>
       transfers.filter((p) => p.date > from && p.date <= to).reduce((s, p) => s + p.amount, 0);
     if (!vals.length) {
-      if (transfers.length) warnings.push(`${acc.name}: der er overførsler, men ingen værdi angivet.`);
+      if (transfers.length) warnings.push({ accountId: acc.id, kind: 'no-value', text: `${acc.name}: der er overførsler, men ingen værdi angivet.` });
       continue;
     }
     const first = vals[0];
-    if (first.date > bookStart) warnings.push(`${acc.name}: første værdi er ${first.date}. Angiv værdien pr. ${bookStart} for en korrekt åbningsbalance.`);
+    if (first.date > bookStart) warnings.push({ accountId: acc.id, kind: 'first-after-bookstart', text: `${acc.name}: første værdi er ${first.date}. Angiv værdien pr. ${bookStart} for en korrekt åbningsbalance.` });
     const openVal = first.value - moved(bookStart, first.date);
     pl(bookStart, ref, openVal, { valuationId: first.id });
     pl(bookStart, 'opening', openVal, { valuationId: first.id });

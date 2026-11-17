@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { dateShort, kr } from '../../domain/format';
 import { isSettled, pairItems, settleRemaining, settleState, undoStand, unpair, withCarry, withSettle, writeOffDifference, writeOffItem, type SettleItem } from '../../domain/settle';
 import { linkGroups, unlinkTx, type LinkGroup } from '../../domain/links';
 import type { Account } from '../../domain/types';
 import { useEngine, usePeriod } from '../../store/actions';
-import { useStore } from '../../store/store';
+import { useStore, type Focus } from '../../store/store';
 import { CategoryCombo, Money, InfoBox, SearchCombo, categoryLabel } from './common';
+import { useFocusIntent } from './NavFocus';
 
 /**
  * Afstemning af en post, der følger overførsler (udlæg, tilgodehavender, gæld til personer):
@@ -20,6 +21,16 @@ export function SettlePanel({ acc }: { acc: Account }) {
   const st = settleState(e.data, e.ledger, acc.id, period);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [showDone, setShowDone] = useState(false);
+  // Linket hertil til en bestemt bevægelse, der ligger i en udlignet gruppe: vis de udlignede.
+  // (Afstemningen vises både på Overførsler og i postens detaljer i Aktiver & passiver.)
+  const revealDone = (f: Focus) => {
+    const k = f.key ?? '';
+    const pre = k.startsWith('settle:item:') ? 'settle:item:' : k.startsWith(`post:${acc.id}:move:`) ? `post:${acc.id}:move:` : undefined;
+    const txId = pre ? k.slice(pre.length) : undefined;
+    if (txId && st.groups.some((g) => g.sum === 0 && g.items.some((i) => i.txId === txId))) setShowDone(true);
+  };
+  useFocusIntent('transfers', revealDone);
+  useFocusIntent('balance', revealDone);
   const selItems = st.open.filter((i) => sel.has(i.key));
   const selSum = selItems.reduce((s, i) => s + i.amount, 0);
   const toggle = (k: string) => setSel((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -34,7 +45,8 @@ export function SettlePanel({ acc }: { acc: Account }) {
   if (!st.items.length) return <div className="small muted">Ingen bevægelser på posten{period ? ` i ${period.name}` : ''}. Vælg "Intern" og posten, når du kategoriserer et udlæg eller en tilbagebetaling.</div>;
 
   const itemRow = (i: SettleItem, extra?: React.ReactNode, actions?: React.ReactNode) => (
-    <tr key={i.key} className={`${i.primo ? 'settle-primo' : ''} ${i.carried ? 'settle-carried' : ''}`.trim() || undefined}>
+    <tr key={i.key} className={`${i.primo ? 'settle-primo' : ''} ${i.carried ? 'settle-carried' : ''}`.trim() || undefined}
+      data-focus={i.txId ? `settle:item:${i.txId} post:${acc.id}:move:${i.txId}` : undefined}>
       <td style={{ width: 28 }}>{extra}</td>
       <td className="small" style={{ whiteSpace: 'nowrap' }}>{i.primo ? 'primo' : dateShort(i.date)}</td>
       <td className="ellipsis" style={{ maxWidth: 360 }} title={i.primo ? `Saldoen pr. ${dateShort(i.date)} – alt fra før perioden samlet` : i.text}>{i.text}</td>
@@ -160,7 +172,6 @@ export const setPostSettle = (periodId: string, id: string, on: boolean) =>
 export function SettleOverview() {
   const e = useEngine();
   const period = usePeriod();
-  const focus = useStore((s) => s.transferFocus);
   const [openId, setOpenId] = useState<string>();
   const [adding, setAdding] = useState(false);
   const update = useStore((s) => s.update);
@@ -170,15 +181,21 @@ export function SettleOverview() {
   const posts = tracked.filter((a) => isSettled(period, a));
   const candidates = tracked.filter((a) => !isSettled(period, a) && !a.archived);
   const groups = linkGroups(e.data, period);
-  // Kommer man fra en post eller en parring: fold posten ud / rul hertil.
-  useEffect(() => {
-    if (!focus?.settle) return;
-    if (focus.postId) setOpenId(focus.postId);
-    useStore.getState().clearTransferFocus();
-    setTimeout(() => ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
-  }, [focus]);
+  // Kommer man fra en post eller en parring: fold posten ud (rul og fremhæv klares af NavFocus).
+  useFocusIntent('transfers', (f) => {
+    const postId = f.ctx?.settle?.postId;
+    if (!f.key?.startsWith('settle:') || !postId) return;
+    if (posts.some((a) => a.id === postId)) { setOpenId(postId); return; }
+    const acc = tracked.find((a) => a.id === postId);
+    if (acc && period && !f.quiet) {
+      useStore.getState().setNavNotice({
+        text: `${acc.name} afstemmes ikke i ${period.name}.`,
+        action: { label: 'Afstem posten', run: () => { setPostSettle(period.id, acc.id, true); useStore.getState().showTransfers({ settle: true, postId: acc.id }); } },
+      });
+    }
+  });
   return (
-    <div className="card" ref={ref} id="afstemning">
+    <div className="card" ref={ref} id="afstemning" data-focus="settle:card">
       <div className="card-head">
         <h2 className="grow">Afstemning</h2>
         {candidates.length > 0 && (adding ? (
@@ -208,14 +225,14 @@ export function SettleOverview() {
               const left = st.pending.reduce((s, i) => s + i.amount, 0) + st.bad.reduce((s, g) => s + g.sum, 0);
               const isOpen = openId === a.id;
               return [
-                <tr key={a.id} className={`click ${isOpen ? 'expanded' : ''}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,input,.combo')) setOpenId(isOpen ? undefined : a.id); }}>
+                <tr key={a.id} className={`click ${isOpen ? 'expanded' : ''}`} data-focus={`settle:post:${a.id}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,input,.combo')) setOpenId(isOpen ? undefined : a.id); }}>
                   <td><span className={`caret ${isOpen ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
                   <td className="num"><Money v={bal} decimals /></td>
                   <td><PostStatus st={st} left={left} /></td>
                   <td className="num settle-actions">
                     {period && !st.done && <PostDecision accountId={a.id} left={left} />}
                     {period && st.done && st.carriedSum !== 0 && <button className="btn sm ghost" title="Fortryd – så er den uafklaret igen" onClick={() => update((d) => undoStand(d, e.ledger, a.id, period))}>Fortryd</button>}
-                    <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id)}>Post →</button>
+                    <button className="btn sm ghost" title="Se posten i Aktiver & passiver" onClick={() => useStore.getState().showPost(a.id, 'settle')}>Post →</button>
                     <button className="btn sm ghost" title={`Fjern fra afstemningen i ${period?.name ?? 'perioden'} (dine parringer bevares)`} aria-label={`Fjern ${a.name} fra afstemningen`} onClick={() => { if (period) setPostSettle(period.id, a.id, false); if (isOpen) setOpenId(undefined); }}>✕</button>
                   </td>
                 </tr>,
@@ -250,7 +267,7 @@ function LinkGroupCard({ g }: { g: LinkGroup }) {
   });
   const ok = g.sum === 0 || !!restCat;
   return (
-    <div className={`xfer-item ${ok ? '' : 'missing'}`}>
+    <div className={`xfer-item ${ok ? '' : 'missing'}`} data-focus={`settle:group:${g.id}`} data-focus-field={ok ? undefined : '.combo-input'}>
       {g.txs.map((t) => (
         <div key={t.id} className="row small carried-line" style={{ borderTop: 0, marginTop: 0, paddingTop: 2 }}>
           <span className="muted" style={{ minWidth: 60 }}>{dateShort(t.date)}</span>

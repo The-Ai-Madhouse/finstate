@@ -9,7 +9,8 @@ export interface TxFilter {
   accountId?: string;
   categoryId?: string;
   type: 'all' | 'income' | 'expense' | 'internal';
-  status: 'all' | 'pending' | 'done';
+  /** uncat: indtægt/udgift uden kategori. */
+  status: 'all' | 'pending' | 'done' | 'uncat';
   from?: string;
   to?: string;
   min?: string;
@@ -41,6 +42,9 @@ export function textMatches(t: Tx, q: string): boolean {
   return words.every((w) => hay.includes(w));
 }
 
+/** Har transaktionen en indtægts-/udgiftslinje uden kategori? */
+export const hasUncategorized = (r: Resolved) => r.lines.some((l) => (l.type === 'income' || l.type === 'expense') && !l.categoryId);
+
 export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories: Category[], f: TxFilter): Tx[] {
   const inCategory = new Set(f.categoryId ? descendants(categories, f.categoryId) : []);
   const min = f.min?.trim() ? parseAmount(f.min) : null;
@@ -56,6 +60,7 @@ export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories
     if (f.withNote && !t.note && !t.memo) return false;
     if (f.status === 'pending' && !NEEDS_REVIEW.has(r.source)) return false;
     if (f.status === 'done' && NEEDS_REVIEW.has(r.source)) return false;
+    if (f.status === 'uncat' && !hasUncategorized(r)) return false;
     if (f.type !== 'all' && !r.lines.some((l) => (f.type === 'internal' ? l.type === 'internal' || l.type === 'outlay' : l.type === f.type))) return false;
     if (f.categoryId && !r.lines.some((l) => l.categoryId && inCategory.has(l.categoryId))) return false;
     return textMatches(t, f.q);

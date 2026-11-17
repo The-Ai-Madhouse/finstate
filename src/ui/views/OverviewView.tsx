@@ -33,7 +33,7 @@ export function OverviewView() {
         {firstTime && (
           <div className="row">
             <span className="muted small">Vil du bare se, hvordan det ser ud?</span>
-            <button className="btn" onClick={() => { replaceAll(demoData()); setPeriod('p-2026-h1'); }}>Prøv med fiktive demodata</button>
+            <button className="btn" onClick={() => { replaceAll(demoData()); setPeriod('p-2026', { replace: true }); }}>Prøv med fiktive demodata</button>
           </div>
         )}
       </div>

@@ -8,6 +8,7 @@ import type { Classification, Tx } from '../../domain/types';
 import { useStore, type LedgerFilter } from '../../store/store';
 import { activeFilterCount, filterTxs } from '../../domain/txfilter';
 import { ChronoReview, focusTxField } from './ChronoReview';
+import { useFocusIntent } from '../components/NavFocus';
 import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
@@ -27,11 +28,8 @@ function LedgerInner() {
     try { return (localStorage.getItem('finstate:ledgerTab') as Tab) || 'chrono'; } catch { return 'chrono'; }
   });
   const setTab = (t: Tab) => { setTabState(t); try { localStorage.setItem('finstate:ledgerTab', t); } catch { /* ok */ } };
-  // Linket hertil til en bestemt transaktion: vis den i gennemgangen.
-  const focusTxId = useStore((s) => s.focusTxId);
   // Filtre ligger i store, så de er der stadig, når man kommer tilbage.
   const filter = useStore((s) => s.ledgerFilter);
-  const setPeriod = useStore((s) => s.setPeriod);
   const e = useEngine();
   const period = usePeriod()!;
   const { data } = e;
@@ -42,17 +40,23 @@ function LedgerInner() {
   const scope = useMemo(() => periodTxs.filter((t) => !filter.accountId || t.accountId === filter.accountId), [periodTxs, filter.accountId]);
   const txs = useMemo(() => filterTxs(periodTxs, e.resolved, data.categories, filter), [periodTxs, e.resolved, data.categories, filter]);
 
-  useEffect(() => {
-    if (!focusTxId) return;
+  // Linket hertil (en transaktion, "mangler afgørelse", "uden kategori"): vis det i gennemgangen.
+  // Perioden er allerede valgt af den, der linker (showTx/goTo).
+  useFocusIntent('ledger', (f) => {
+    if (!f.key?.startsWith('tx:') && !f.key?.startsWith('ledger:')) return;
+    // Frem/tilbage: lad de filtre og den fane, du selv har valgt siden, være.
+    if (f.quiet) return;
     setTabState('chrono');
-    const t = data.txs.find((x) => x.id === focusTxId);
-    if (!t) return;
-    // Ligger transaktionen i et andet financial statement, så skift til det.
-    if (!inPeriod(t, period)) { const p = data.periods.find((x) => inPeriod(t, x)); if (p) setPeriod(p.id); }
-    // Ville filtrene skjule den, så nulstil dem (sorteringen bevares).
-    const f = useStore.getState().ledgerFilter;
-    if (!filterTxs([t], e.resolved, data.categories, f).length) useStore.getState().resetLedgerFilter();
-  }, [focusTxId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const st = useStore.getState();
+    if (f.key.startsWith('tx:')) {
+      // Ville filtrene skjule transaktionen, så nulstil dem (sorteringen bevares).
+      const t = data.txs.find((x) => x.id === f.key!.slice(3));
+      if (t && !filterTxs([t], e.resolved, data.categories, st.ledgerFilter).length) st.resetLedgerFilter();
+    } else if (f.ctx?.ledgerFilter) {
+      st.resetLedgerFilter();
+      st.setLedgerFilter(f.ctx.ledgerFilter);
+    }
+  });
 
   const review = txs.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source));
   const scopeReview = scope.filter((t) => NEEDS_REVIEW.has(e.resolved.get(t.id)!.source)).length;
@@ -131,7 +135,7 @@ function FilterBar({ total, shown }: { total: number; shown: number }) {
       </div>
       <div className="row small">
         {seg('type', [['all', 'Alle typer'], ['income', 'Indtægt'], ['expense', 'Udgift'], ['internal', 'Intern']])}
-        {seg('status', [['all', 'Alle'], ['pending', 'Mangler afgørelse'], ['done', 'Afgjort']])}
+        {seg('status', [['all', 'Alle'], ['pending', 'Mangler afgørelse'], ['uncat', 'Uden kategori'], ['done', 'Afgjort']])}
         <button className={`btn sm ghost ${more ? 'on' : ''}`} onClick={() => setMore(!more)}>{more ? 'Færre filtre ▴' : 'Dato, beløb, kommentar ▾'}</button>
         <span className="spacer" />
         <span className="muted">Viser {shown} af {total}</span>

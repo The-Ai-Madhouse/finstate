@@ -10,6 +10,8 @@ import { SplitDialog } from '../components/SplitDialog';
 import { ClassEditor, Empty, internalTargetName, Money, linkTargetProps, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
 import { Confetti } from '../components/Confetti';
 import { useStore } from '../../store/store';
+import { useFocusIntent } from '../components/NavFocus';
+import { hasUncategorized } from '../../domain/txfilter';
 
 const clsOf = (r: Resolved): Classification => clsOfLine(r.lines[0]);
 const similarKey = (t: Tx) => `${normalizeText(t.text) || t.text}|${t.amount > 0 ? 'in' : 'out'}`;
@@ -68,21 +70,8 @@ export function focusTxField(txId: string, attr = 'data-txrow') {
 export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]; searching?: boolean }) {
   const e = useEngine();
   const [hideDone, setHideDone] = useState(false);
-  const focusTxId = useStore((s) => s.focusTxId);
-  const [targetId, setTargetId] = useState<string>();
-  useEffect(() => {
-    if (!focusTxId) return;
-    setHideDone(false);
-    setTargetId(focusTxId);
-    useStore.getState().clearFocusTx();
-    setTimeout(() => {
-      const row = document.querySelector<HTMLElement>(`[data-txrow="${focusTxId}"]`);
-      row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      // Kun fremhæv – en gemt transaktion skal forblive gemt, indtil man selv trykker "Ret".
-      row?.focus({ preventScroll: true });
-    }, 80);
-    setTimeout(() => setTargetId(undefined), 2600);
-  }, [focusTxId]);
+  // Linket hertil til en bestemt transaktion: vis den, også hvis den er afgjort (fremhævningen klares af NavFocus).
+  useFocusIntent('ledger', (f) => { if (!f.quiet && (f.key?.startsWith('tx:') || f.key === 'ledger:uncat')) setHideDone(false); });
   // Rækkefølgen kommer fra filterlinjen (standard: dato, ældst først).
   const sorted = txs;
 
@@ -210,12 +199,12 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
         )}
       </div>
       {!shown.length ? <Empty>{searching ? 'Ingen transaktioner matcher filtrene.' : 'Alt i perioden er afgjort. 🎉'}</Empty> : (
-        <div>
+        <div className="chrono-list">
           {shown.map((t) => {
             const r = e.resolved.get(t.id)!;
             const similar = (byKey.get(similarKey(t)) ?? []).filter((x) => x.id !== t.id);
             // Nøglen nulstiller kladden, når transaktionens klassifikation ændres udefra.
-            return <ChronoRow key={`${t.id}|${r.source}|${JSON.stringify(r.lines)}`} tx={t} r={r} similar={similar} flash={flash === t.id} onCommit={onCommit} targeted={targetId === t.id} />;
+            return <ChronoRow key={`${t.id}|${r.source}|${JSON.stringify(r.lines)}`} tx={t} r={r} similar={similar} flash={flash === t.id} onCommit={onCommit} />;
           })}
         </div>
       )}
@@ -223,7 +212,7 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
   );
 }
 
-function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: Resolved; similar: Tx[]; flash: boolean; onCommit: (txId: string, coveredByRule: number) => void; targeted?: boolean }) {
+function ChronoRow({ tx, r, similar, flash, onCommit }: { tx: Tx; r: Resolved; similar: Tx[]; flash: boolean; onCommit: (txId: string, coveredByRule: number) => void }) {
   const e = useEngine();
   const isPending = NEEDS_REVIEW.has(r.source);
   const [editing, setEditing] = useState(false);
@@ -271,7 +260,9 @@ function ChronoRow({ tx, r, similar, flash, onCommit, targeted }: { tx: Tx; r: R
   const nSimilar = period ? similar.filter((t) => inPeriod(t, period)).length : similar.length;
   const similarLabel = `Lignende (${nSimilar}${nSimilar < similar.length ? `+${similar.length - nSimilar}` : ''})`;
   return (
-    <div className={`chrono-row ${open ? 'open' : 'done'} ${flash ? 'flash' : ''} ${targeted ? 'targeted' : ''} ${lt.className}`} tabIndex={0} data-txrow={tx.id} data-pending={isPending} onKeyDown={onKey}
+    <div className={`chrono-row ${open ? 'open' : 'done'} ${flash ? 'flash' : ''} ${lt.className}`} tabIndex={0} data-txrow={tx.id} data-pending={isPending}
+      data-focus-field={isPending ? '.combo-input, input[aria-label="Person"]' : undefined}
+      data-focus={[`tx:${tx.id}`, isPending && 'ledger:pending', hasUncategorized(r) && 'ledger:uncat'].filter(Boolean).join(' ')} onKeyDown={onKey}
       title={lt.title} onClickCapture={lt.onClickCapture}>
       <div className="small ink2">{dateShort(tx.date)}<div className="muted ellipsis">{acc?.name}</div></div>
       <div style={{ minWidth: 0 }}>

@@ -21,10 +21,16 @@ const TABS: [Tab, string][] = [['accounts', 'Poster & typer'], ['categories', 'K
 
 export function SettingsView() {
   const hasCategories = useStore((s) => s.data.categories.length > 0);
+  // Fanen står i adresselinjen (#/settings/kategorier …), så frem/tilbage og direkte links virker.
   const linked = useStore((s) => s.settingsTab) as Tab | undefined;
-  const [tab, setTab] = useState<Tab>(linked ?? (hasCategories ? 'accounts' : 'categories'));
-  // Direkte links (fx "Rediger kategorier →") åbner den rigtige fane.
-  useEffect(() => { if (linked) setTab(linked); }, [linked]);
+  // Standardfanen vælges, når Indstillinger åbnes – og bliver stående (fx når man lige har lavet sin første kategori).
+  const [fallback] = useState<Tab>(() => (hasCategories ? 'accounts' : 'categories'));
+  const tab: Tab = linked ?? fallback;
+  const setTab = (t: Tab) => {
+    // Samme fane som den viste: ingen ny post i historikken (højst skriv fanen i adressen).
+    if (t === tab) { if (!linked) useStore.getState().goTo({ view: 'settings', tab: t }, { replace: true }); return; }
+    useStore.getState().setView('settings', t);
+  };
   return (
     <div className="stack">
       <h1>Indstillinger</h1>
@@ -391,11 +397,11 @@ function DataTab() {
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn" onClick={() => {
             if (data.txs.length && !confirm('Demodata erstatter dine nuværende data. Har du taget backup?')) return;
-            replaceAll(demoData()); setPeriod('p-2026-h1'); setMsg({ level: 'info', text: 'Fiktive demodata indlæst.' });
+            replaceAll(demoData()); setPeriod('p-2026', { replace: true }); setMsg({ level: 'info', text: 'Fiktive demodata indlæst.' });
           }}>Indlæs fiktive demodata</button>
           <button className="btn danger" onClick={() => {
             if (!confirm('Slet ALLE data i denne browser? Det kan ikke fortrydes uden backup.')) return;
-            replaceAll(emptyData()); setPeriod(undefined); setMsg({ level: 'info', text: 'Alle data er slettet.' });
+            replaceAll(emptyData()); setPeriod(undefined, { replace: true }); setMsg({ level: 'info', text: 'Alle data er slettet.' });
           }}>Slet alle data</button>
           <button className="btn" onClick={() => {
             if (!confirm('Slet transaktioner, værdier og perioder, men behold konti, kategorier, regler og bankmapping?')) return;
