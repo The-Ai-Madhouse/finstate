@@ -110,3 +110,19 @@ describe('server: 2FA-login og krypteret lagring', () => {
     expect(backupFiles.sort()).toEqual(['auth.json', 'finstate.json']);
   });
 });
+
+describe('kun hjemmenetværket', () => {
+  it('godkender private adresser og afviser offentlige', async () => {
+    const { isPrivateIp, clientIp } = await import('./net.ts');
+    for (const ip of ['192.168.1.20', '10.0.0.5', '172.16.3.4', '172.31.255.1', '127.0.0.1', '::1', 'fe80::1%en0', 'fd12:3456::1', '::ffff:192.168.0.9', '169.254.10.1'])
+      expect(isPrivateIp(ip), ip).toBe(true);
+    for (const ip of ['8.8.8.8', '172.32.0.1', '100.64.1.2', '2a00:1450::1', '::ffff:8.8.8.8', undefined, 'skrald'])
+      expect(isPrivateIp(ip), String(ip)).toBe(false);
+    // Bag Caddy (forbindelsen kommer fra 127.0.0.1): den sidste X-Forwarded-For er klienten – en falsk værdi forrest hjælper ikke.
+    const req = (remote: string, xff?: string) => ({ socket: { remoteAddress: remote }, headers: xff ? { 'x-forwarded-for': xff } : {} }) as never;
+    expect(clientIp(req('127.0.0.1', '192.168.1.7, 8.8.8.8'))).toBe('8.8.8.8');
+    expect(clientIp(req('127.0.0.1', '192.168.1.7'))).toBe('192.168.1.7');
+    // Direkte forbindelse: X-Forwarded-For ignoreres (kan forfalskes).
+    expect(clientIp(req('8.8.8.8', '192.168.1.7'))).toBe('8.8.8.8');
+  });
+});

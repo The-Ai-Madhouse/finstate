@@ -16,7 +16,7 @@ npm test         # tests af regnskabsmotoren
 > **Versioner** (knappen øverst): gem en navngiven milepæl, se hvad der er ændret siden, og gå tilbage.
 >
 > **Raspberry Pi:** `npm run build && npm run serve` kører Finstate som selvstændig server. Se
-> [deploy/RASPBERRY-PI.md](deploy/RASPBERRY-PI.md) for sikker opsætning med Tailscale (HTTPS, ingen åbne porte),
+> [deploy/RASPBERRY-PI.md](deploy/RASPBERRY-PI.md) for sikker opsætning **kun på hjemmenetværket** (HTTPS, firewall, afviser alt udefra),
 > systemd og backup til din computer (`scripts/backup-from-pi.sh`).
 
 ## Privatliv

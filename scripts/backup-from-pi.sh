@@ -2,8 +2,8 @@
 # Hent den krypterede Finstate-mappe fra din Raspberry Pi til din computer (fx så Time Machine tager den med).
 # Filerne er krypteret – de kan kun åbnes med din adgangskode og 2FA:  FINSTATE_DIR=<mappe>/current npm start
 #
-#   scripts/backup-from-pi.sh DINBRUGER@finstate                    # → ~/Documents/FinstateBackup
-#   scripts/backup-from-pi.sh DINBRUGER@finstate ~/Sti/Til/Backup
+#   scripts/backup-from-pi.sh DINBRUGER@finstate.local                    # → ~/Documents/FinstateBackup
+#   scripts/backup-from-pi.sh DINBRUGER@finstate.local ~/Sti/Til/Backup
 #
 # Kræver på Pi'en en sudo-regel, der KUN tillader rsync at sende (læse) filer – se deploy/RASPBERRY-PI.md.
 set -euo pipefail

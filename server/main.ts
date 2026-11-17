@@ -5,14 +5,17 @@
  *
  * Miljø:
  *   FINSTATE_DIR            datamappe (standard ~/Documents/Finstate)
- *   PORT / HOST             standard 5173 / 127.0.0.1 – lyt KUN lokalt, og lad Tailscale give HTTPS udefra
- *   FINSTATE_ALLOWED_HOSTS  fx "finstate.tailnet-navn.ts.net" (navnet, du åbner siden med)
+ *   PORT / HOST             standard 5173 / 127.0.0.1 – lyt KUN lokalt; Caddy på Pi'en giver HTTPS på hjemmenetværket
+ *   FINSTATE_ALLOWED_HOSTS  fx "finstate.local" (navnet, du åbner siden med)
+ *
+ * Kun hjemmenetværket: forespørgsler fra en offentlig IP-adresse afvises altid (se server/net.ts).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handler } from './storage.ts';
+import { fromHomeNetwork } from './net.ts';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'dist');
@@ -55,6 +58,8 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse) {
 const api = handler(root);
 createServer((req, res) => {
   secure(res);
+  // Kun dit eget netværk – aldrig udefra, heller ikke hvis en port ved en fejl åbnes i routeren.
+  if (!fromHomeNetwork(req)) { res.statusCode = 403; return res.end('Finstate kan kun bruges fra hjemmenetværket.'); }
   void api(req, res, () => {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; return res.end(); }
     void serveStatic(req, res);

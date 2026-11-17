@@ -1,0 +1,16 @@
+# Caddy på Raspberry Pi'en: HTTPS på hjemmenetværket – kun for adresser på dit eget netværk.
+# Installér: se deploy/RASPBERRY-PI.md  (kopieres til /etc/caddy/Caddyfile)
+{
+	# Ingen henvendelser ud på internettet efter certifikater – Caddy laver sit eget lokale certifikat.
+	auto_https disable_redirects
+}
+
+finstate.local {
+	tls internal
+
+	# Alt, der ikke kommer fra dit eget netværk, afbrydes med det samme.
+	@outside not remote_ip private_ranges
+	abort @outside
+
+	reverse_proxy 127.0.0.1:5173
+}

@@ -6,7 +6,7 @@
  *    eller et gyldigt login (cookie). Ældre ukrypterede filer krypteres, når login sættes op.
  *  · Skrives atomisk (midlertidig fil + omdøbning); forrige udgave gemmes som finstate.json.bak.
  *  · Kun Finstates egen side: Host/Origin skal være 127.0.0.1/localhost – eller et navn i $FINSTATE_ALLOWED_HOSTS
- *    (fx Pi'ens Tailscale-navn).
+ *    (fx finstate.local – Pi'ens navn på hjemmenetværket).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
