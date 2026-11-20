@@ -4,7 +4,7 @@ import { emptyData } from '../domain/defaults';
 import { inPeriod, withAutoBookStart } from '../domain/engine';
 import { VIEW_LABEL, decodeHash, encodeHash, sameRoute, type NavTarget, type Route, type View } from '../domain/nav-target';
 import type { TxFilter } from '../domain/txfilter';
-import type { AppData } from '../domain/types';
+import type { AppData, Classification } from '../domain/types';
 
 export type { View, NavTarget } from '../domain/nav-target';
 
@@ -65,6 +65,8 @@ export type LinkPick = {
   txId: string; mode: 'plain' | 'post' | 'bank'; postId?: string; periodId?: string;
   /** De valgte (klik for at vælge/fravælge, Enter for at parre). En overførsel mellem dine konti har kun én modpost. */
   others?: string[];
+  /** Det, man allerede har valgt i parringsvinduet (fx Intern → en post) – huskes, når man går tilbage og vælger videre. */
+  cls?: Classification;
 };
 
 export type LedgerFilter = TxFilter;

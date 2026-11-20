@@ -21,7 +21,8 @@ export function PairDialog() {
     return () => window.removeEventListener('keydown', onKey);
   }, [draft]);
   if (!draft) return null;
-  return <PairDialogInner key={`${draft.pick.txId}|${draft.otherIds.join(',')}`} />;
+  // Nøglen er kun kilden: tilføjer eller fjerner man transaktioner i vinduet, bevares det valgte (fx Intern).
+  return <PairDialogInner key={draft.pick.txId} />;
 }
 
 function PairDialogInner() {
@@ -37,6 +38,7 @@ function PairDialogInner() {
   const sum = all.reduce((s, t) => s + t.amount, 0); // fra bankens side
   // Samme valg som i kategoriseringen – forudfyldt med det, en af dem allerede er.
   const [cls, setCls] = useState<Classification>(() => {
+    if (pick.cls) return pick.cls;
     if (pick.mode === 'bank' && a && b) return { type: 'internal', targetAccountId: b.accountId };
     if (pick.postId) return { type: 'internal', targetAccountId: pick.postId };
     for (const t of all) {
@@ -86,7 +88,7 @@ function PairDialogInner() {
     .sort((x, y) => Math.abs(x.amount + sum) - Math.abs(y.amount + sum) || Math.abs(Date.parse(x.date) - Date.parse(a.date)) - Math.abs(Date.parse(y.date) - Date.parse(a.date)))
     .slice(0, 400)
     .map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${t.text} · ${kr2f(t.amount)}`, hint: `· ${acc(t.accountId)?.name ?? ''}${t.amount + sum === 0 ? ' · går op' : ''}` })) : [];
-  const backToList = () => { close(); useStore.getState().setLinkPick({ ...pick, others: otherIds }); };
+  const backToList = () => { close(); useStore.getState().setLinkPick({ ...pick, others: otherIds, cls }); };
   const line = (t: Tx) => (
     <div className="row small pair-line">
       <span className="muted" style={{ minWidth: 64 }}>{dateShort(t.date)}</span>
