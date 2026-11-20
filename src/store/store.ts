@@ -37,6 +37,11 @@ interface State {
   resetLedgerFilter: () => void;
   update: (recipe: (d: AppData) => AppData) => void;
   replaceAll: (d: AppData) => void;
+  /** Fortryd/gentag (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) – kun i denne session. */
+  undoStack: UndoEntry[];
+  redoStack: UndoEntry[];
+  undo: () => UndoEntry | undefined;
+  redo: () => UndoEntry | undefined;
   markExported: () => void;
   /** Gå til en side (en ny post i browserens historik, så Tilbage virker). */
   setView: (v: View, settingsTab?: string) => void;
@@ -172,6 +177,17 @@ const fileStorage: StateStorage = {
   removeItem: () => {},
 };
 
+/** En tilstand, man kan fortryde tilbage til – og hvor man stod (så man kan føres derhen igen). */
+export interface UndoEntry { data: AppData; focusTx?: string; view?: View }
+const UNDO_MAX = 100;
+const stamp = (d: AppData): AppData => ({ ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } });
+/** Husk den nuværende tilstand før en ændring. Data er uforanderlige, så det koster kun en reference. */
+function pushUndo(s: { data: AppData; undoStack: UndoEntry[]; view: View }): Pick<State, 'undoStack' | 'redoStack'> {
+  const row = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-txrow],[data-ledgerrow]') : null;
+  const focusTx = row?.dataset.txrow ?? row?.dataset.ledgerrow;
+  return { undoStack: [...s.undoStack.slice(-(UNDO_MAX - 1)), { data: s.data, focusTx, view: s.view }], redoStack: [] };
+}
+
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
@@ -183,12 +199,30 @@ export const useStore = create<State>()(
       resetLedgerFilter: () => set((s) => ({ ledgerFilter: { ...DEFAULT_LEDGER_FILTER, sort: s.ledgerFilter.sort } })),
       update: (recipe) =>
         set((s) => {
-          const d = withAutoBookStart(recipe(s.data));
-          return { data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } } };
+          const r = recipe(s.data);
+          if (r === s.data) return {};
+          const d = withAutoBookStart(r);
+          return { data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } }, ...pushUndo(s) };
         }),
       replaceAll: (raw) => {
         const d = withAutoBookStart(raw);
-        set({ data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } } });
+        set((s) => ({ data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } }, ...pushUndo(s) }));
+      },
+      undoStack: [],
+      redoStack: [],
+      undo: () => {
+        const s = get();
+        const prev = s.undoStack[s.undoStack.length - 1];
+        if (!prev) return undefined;
+        set({ data: stamp(prev.data), undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, { data: s.data, focusTx: prev.focusTx, view: prev.view }] });
+        return prev;
+      },
+      redo: () => {
+        const s = get();
+        const next = s.redoStack[s.redoStack.length - 1];
+        if (!next) return undefined;
+        set({ data: stamp(next.data), redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, { data: s.data, focusTx: next.focusTx, view: next.view }] });
+        return next;
       },
       markExported: () => set((s) => ({ data: { ...s.data, settings: { ...s.data.settings, lastExportAt: new Date().toISOString() } } })),
       setNavNotice: (navNotice) => set({ navNotice }),

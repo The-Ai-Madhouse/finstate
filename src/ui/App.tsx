@@ -1,3 +1,4 @@
+import { UndoLayer } from './components/Undo';
 import { StatementSwitcher } from './components/PeriodPrompt';
 import { NEEDS_REVIEW } from '../domain/classify';
 import { inPeriod } from '../domain/engine';
@@ -54,6 +55,7 @@ export function App() {
     <div className="app">
       <PairDialog />
       <NavCallout />
+      <UndoLayer />
       <nav className="nav" aria-label="Hovedmenu">
         <div className="brand"><span className="brand-mark" aria-hidden>◐</span>Finstate <small>lokalt & privat</small></div>
         <StatementSwitcher />

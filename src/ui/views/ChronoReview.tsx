@@ -10,6 +10,7 @@ import { SplitDialog } from '../components/SplitDialog';
 import { ClassEditor, Empty, internalTargetName, Money, linkTargetProps, SourceChip, TYPE_KEYS, TxNotes, categoryLabel, isComplete, withTypeKey, InfoBox } from '../components/common';
 import { Confetti } from '../components/Confetti';
 import { useStore } from '../../store/store';
+import { UNDO_KEY, undo } from '../components/Undo';
 import { useFocusIntent } from '../components/NavFocus';
 import { hasUncategorized } from '../../domain/txfilter';
 
@@ -108,7 +109,26 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
   const prevPending = useRef(pending.length);
   const showPop = (text: string, big = false) => setPop((p) => ({ n: (p?.n ?? 0) + 1, text, big }));
 
+  // Hvor man har været: efter en afgørelse hopper markøren videre – "← Tilbage" fører én tilbage.
+  const [trail, setTrail] = useState<string[]>([]);
+  const goBack = () => {
+    const id = trail[trail.length - 1];
+    if (!id) return;
+    setTrail((t) => t.slice(0, -1));
+    const row = document.querySelector<HTMLElement>(`[data-txrow="${CSS.escape(id)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // En afgjort række har intet kategorifelt – så får rækken selv fokus (Enter/"Ret" for at ændre den).
+    (row.querySelector<HTMLElement>('.combo-input, input[aria-label="Person"]') ?? row).focus({ preventScroll: true });
+    setFlash(id);
+    setTimeout(() => setFlash((f) => (f === id ? undefined : f)), 1200);
+  };
+  const goBackRef = useRef(goBack);
+  goBackRef.current = goBack;
+  const canUndo = useStore((s) => s.undoStack.length > 0);
+
   const onCommit = (txId: string, coveredByRule: number) => {
+    setTrail((t) => [...t.filter((x) => x !== txId).slice(-49), txId]);
     setDecisions((d) => d + 1);
     setFlash(txId);
     setTimeout(() => setFlash((f) => (f === txId ? undefined : f)), 900);
@@ -137,6 +157,11 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
       if ((ev.key === 'n' || ev.key === 'N') && !ev.metaKey && !ev.ctrlKey && !['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) {
         ev.preventDefault();
         focusNextPending('');
+      }
+      // "B" = tilbage til den, man lige har afgjort.
+      if ((ev.key === 'b' || ev.key === 'B') && !ev.metaKey && !ev.ctrlKey && !['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) {
+        ev.preventDefault();
+        goBackRef.current();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -188,10 +213,12 @@ export function ChronoReview({ txs, scope, searching }: { txs: Tx[]; scope: Tx[]
           </div>
           <div className="bigprogress" aria-hidden><div style={{ width: `${pct}%` }} /></div>
           <InfoBox label="Genveje">
-            <b>Skriv</b> for at søge kategori/post · <b>↑/↓</b> vælg · <b>Enter</b> gem og videre · <b>1</b>/<b>2</b> (eller Alt+1/2) indtægt-udgift/intern · <b>N</b> næste ubehandlede
+            <b>Skriv</b> for at søge kategori/post · <b>↑/↓</b> vælg · <b>Enter</b> gem og videre · <b>{UNDO_KEY}</b> fortryd · <b>B</b> tilbage til forrige · <b>1</b>/<b>2</b> (eller Alt+1/2) indtægt-udgift/intern · <b>N</b> næste ubehandlede
           </InfoBox>
         </div>
         <label className="row small ink2"><input type="checkbox" checked={hideDone} onChange={(ev) => setHideDone(ev.target.checked)} /> Skjul afgjorte</label>
+        <button className="btn sm" disabled={!trail.length} onClick={goBack} title="Tilbage til den, du lige afgjorde (tast B)">← Tilbage</button>
+        <button className="btn sm" disabled={!canUndo} onClick={() => undo()} title={`Fortryd den seneste ændring (${UNDO_KEY})`}>↶ Fortryd</button>
         {pending.length > 0 && (
           <button className="btn primary" onClick={() => focusNextPending('')} title="Tast N">
             Næste ubehandlede {nextDir === 'up' ? '↑' : nextDir === 'down' ? '↓' : '→'}
