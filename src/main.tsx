@@ -6,7 +6,8 @@ import { flushSave, initHistory, useStore } from './store/store';
 import './styles.css';
 
 /**
- * Opstart: login (2FA) → indlæs de krypterede data → vis appen.
+ * Opstart: (login med 2FA, når Finstate kører på netværket) → indlæs de krypterede data → vis appen.
+ * Lokalt er der intet login – serveren svarer straks "logget ind".
  * Udløber login'et undervejs, vises login igen ovenpå – ændringer gemmes, når man er logget ind.
  */
 function Boot() {

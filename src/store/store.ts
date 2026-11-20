@@ -69,7 +69,7 @@ export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status:
 const KEY = 'finstate:v1';
 
 /** Hvor gemmes der lige nu? file = krypteret i datafilen (via serveren); error = serveren kunne ikke gemme. */
-export interface SaveStatus { mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string }
+export interface SaveStatus { mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string; /** Kører lokalt uden login. */ local?: boolean }
 
 let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -138,8 +138,8 @@ const fileStorage: StateStorage = {
     const info = await fetch('/api/storage', { cache: 'no-store' });
     if (info.status === 401) { lost(); throw new Error('Ikke logget ind'); }
     if (!info.ok) throw new Error((await info.json().catch(() => ({}))).error ?? `HTTP ${info.status}`);
-    const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string };
-    setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined });
+    const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string; local?: boolean };
+    setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined, local: !!meta.local });
     const local = legacyLocal();
     if (meta.exists) {
       const r = await fetch('/api/data', { cache: 'no-store' });

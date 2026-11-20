@@ -95,8 +95,7 @@ cd /opt/finstate && sudo npm ci && sudo npm run build
 
 ## 3. Flyt dine (krypterede) data over
 
-Sæt login op på Mac'en først. Start Finstate med `npm start`, så krypteres dine nuværende data. Kopiér derefter den krypterede
-mappe til Pi'en:
+Lokalt kører Finstate uden login, men data er krypteret med nøglen i `local.key`. Kopiér hele mappen (også `local.key`) til Pi'en:
 
 ```bash
 rsync -a ~/Documents/Finstate/ DINBRUGER@finstate.local:/tmp/finstate-data/      # på Mac'en – filerne er krypteret
@@ -104,7 +103,9 @@ sudo rsync -a /tmp/finstate-data/ /var/lib/finstate/data/ && sudo rm -rf /tmp/fi
 sudo chown -R finstate:finstate /var/lib/finstate/data
 ```
 
-Du logger ind på Pi'en med **samme adgangskode og 2FA-app**.
+Første gang du åbner Finstate på Pi'en, sætter du login op (adgangskode + 2FA-app). Login'et låser den samme nøgle op, og
+`local.key` slettes på Pi'en – derefter kan data kun læses med adgangskode + 2FA. Har du allerede sat login op tidligere, logger du ind med
+**samme adgangskode og 2FA-app**.
 
 ## 4. Start tjenesten og HTTPS
 
@@ -153,7 +154,7 @@ scripts/backup-from-pi.sh DINBRUGER@finstate.local ~/Documents/FinstateBackup
 ```
 
 Scriptet beholder en kopi pr. dag (60 dage) i `snapshots/`. Ligger mappen under din Time Machine eller iCloud, kommer den
-automatisk med derfra. Sådan åbner du en backup på Mac'en:
+automatisk med derfra. Sådan åbner du en backup på Mac'en (første gang låser du den op med adgangskode + 2FA – derefter kører den uden login):
 
 ```bash
 FINSTATE_DIR=~/Documents/FinstateBackup/current npm start

@@ -33,6 +33,7 @@ const RESULTS: { id: View; label: string; icon: string }[] = [
 
 export function App() {
   const saveMode = useStore((s) => s.saveStatus.mode);
+  const localMode = useStore((s) => s.saveStatus.local);
   const view = useStore((s) => s.view);
   const engine = useEngine();
   const period = usePeriod();
@@ -84,7 +85,7 @@ export function App() {
           <NavItem id="settings" label="Indstillinger" icon={<span className="step">⚙</span>} />
         </div>
         <div className="nav-foot">
-          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : 'Krypteret og kræver login med 2FA.'}
+          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : localMode ? 'Krypteret og kører kun på din computer.' : 'Krypteret og kræver login med 2FA.'}
           <div className="nav-version" title={VERSION_DETAILS}>{VERSION_LABEL}</div>
         </div>
       </nav>

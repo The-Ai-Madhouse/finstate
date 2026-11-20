@@ -8,10 +8,13 @@ npm start        # åbner http://127.0.0.1:5173
 npm test         # tests af regnskabsmotoren
 ```
 
-> **Login med 2FA og kryptering.** Første gang vælger du en adgangskode og tilføjer Finstate i en 2FA-app
-> (Google Authenticator, 1Password …). Login holder i 4 uger pr. enhed. Data gemmes **krypteret** (AES-256-GCM) i
-> `~/Documents/Finstate/` (anden mappe: `FINSTATE_DIR=/sti npm start` – altid uden for projektet) og kan kun låses
-> op med adgangskode + 2FA. Glemmer du adgangskoden, kan data ikke gendannes.
+> **Lokalt: intet login. På netværket: login med 2FA.** Med `npm start` kører Finstate kun på din computer (127.0.0.1), og der er
+> intet login. Data gemmes stadig **krypteret** (AES-256-GCM) i `~/Documents/Finstate/` (anden mappe: `FINSTATE_DIR=/sti npm start`
+> – altid uden for projektet); nøglen ligger i `local.key` i samme mappe og kan kun læses af din bruger.
+> Kører Finstate på netværket (`npm run serve`, fx på en Raspberry Pi), kræves adgangskode + 2FA-app (Google Authenticator,
+> 1Password …); login holder i 4 uger pr. enhed. Når login sættes op, låser det samme nøgle op, og `local.key` slettes – så data
+> kun kan læses med adgangskode + 2FA. Åbner du en mappe med login lokalt (fx en backup fra Pi'en), låser du den op én gang.
+> `FINSTATE_LOGIN=on|off` overstyrer standarden. Glemmer du adgangskoden til en mappe uden `local.key`, kan data ikke gendannes.
 >
 > **Versioner** (knappen øverst): gem en navngiven milepæl, se hvad der er ændret siden, og gå tilbage.
 >
