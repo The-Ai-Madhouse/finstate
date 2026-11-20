@@ -14,6 +14,7 @@ import { SlidesView } from './views/SlidesView';
 import { StatementView } from './views/StatementView';
 import { TransfersView } from './views/TransfersView';
 import { VersionsView } from './views/VersionsView';
+import { BudgetView } from './views/BudgetView';
 import { PairDialog } from './components/PairDialog';
 import { NavCallout, useNavFocus } from './components/NavFocus';
 
@@ -57,6 +58,9 @@ export function App() {
         <StatementSwitcher />
         <NavItem id="overview" label="Overblik" icon={<span className="step">⌂</span>} />
 
+        <div className="nav-label">Dagligt budget</div>
+        <NavItem id="budget" label="Abonnementer & regninger" icon={<span className="step bud-ic">◷</span>} />
+
         <div className="nav-label">Arbejdsgang</div>
         {WORK.map((w) => {
           const steps = guide.filter((g) => w.steps.includes(g.id));
@@ -87,7 +91,7 @@ export function App() {
       <div className="main">
         <TopBar />
         <div className="content">
-          {view !== 'overview' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
+          {view !== 'overview' && view !== 'budget' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
           {view === 'overview' && <OverviewView />}
           {view === 'import' && <ImportView />}
           {view === 'ledger' && <LedgerView />}
@@ -97,6 +101,7 @@ export function App() {
           {view === 'slides' && <SlidesView />}
           {view === 'settings' && <SettingsView />}
           {view === 'versions' && <VersionsView />}
+          {view === 'budget' && <BudgetView />}
         </div>
       </div>
     </div>
@@ -117,6 +122,7 @@ function NavItem({ id, label, icon, extra, title, disabled }: { id: View; label:
 }
 
 function TopBar() {
+  const view = useStore((s) => s.view);
   const storageError = useStore((s) => s.storageError);
   const save = useStore((s) => s.saveStatus);
   const setView = useStore((s) => s.setView);
@@ -124,7 +130,9 @@ function TopBar() {
   return (
     <>
       <div className="topbar">
-        {period
+        {view === 'budget'
+          ? <span className="crumb">Dagligt budget · <b>Abonnementer & regninger</b> <span className="muted">(adskilt fra financial statementet)</span></span>
+          : period
           ? <span className="crumb">Financial statement · <b>{period.name}</b> <span className="muted">({period.start} – {period.end})</span></span>
           : <span className="crumb muted">Intet financial statement valgt</span>}
         <span className="spacer" />

@@ -23,6 +23,11 @@ npm test         # tests af regnskabsmotoren
 > [deploy/RASPBERRY-PI.md](deploy/RASPBERRY-PI.md) for sikker opsætning **kun på hjemmenetværket** (HTTPS, firewall, afviser alt udefra),
 > systemd og backup til din computer (`scripts/backup-from-pi.sh`).
 
+> **Dagligt budget – abonnementer & regninger** (i menuen under *Dagligt budget*): adskilt fra financial statementet og
+> uden periode. Finstate finder selv dine faste træk (samme modtager med fast rytme – måned, kvartal, halvår eller år – og
+> nogenlunde samme beløb) og viser dem i en kalender med ✓ for betalte, næste store regning og de næste 12 måneder.
+> Har den taget fejl, så ret abonnementet eller skjul det; mangler der et, så tilføj det. Kun dine rettelser gemmes.
+
 ## Privatliv
 - Ingen server, intet login, ingen analytics. En Content-Security-Policy i `index.html` forhindrer siden i at
   sende data nogen steder hen (kun dev-serverens egen websocket er tilladt).

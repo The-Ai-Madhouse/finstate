@@ -235,6 +235,33 @@ export interface Settings {
   lastChangeAt?: string;
 }
 
+/** Dagligt budget: hvor ofte et abonnement eller en fast udgift trækkes. */
+export type Cadence = 'monthly' | 'quarterly' | 'halfyear' | 'yearly';
+
+/** Et abonnement, brugeren selv har tilføjet – eller rettet (så har det key fra det fundne abonnement). */
+export interface Subscription {
+  id: string;
+  /** Nøglen på det automatisk fundne abonnement, der er rettet ("<konto>|<normaliseret tekst>"). Uden = tilføjet manuelt. */
+  key?: string;
+  name: string;
+  /** Beløb pr. træk (positive øre). */
+  amount: number;
+  cadence: Cadence;
+  /** En dato, hvor det trækkes – de øvrige regnes ud herfra. */
+  anchor: string;
+  accountId?: string;
+  /** Tekst i banken, der genkender trækket (manuelle abonnementer). Standard: navnet. */
+  match?: string;
+  note?: string;
+}
+
+/** Dagligt budget – helt adskilt fra financial statementet. Kun brugerens rettelser gemmes; resten findes i transaktionerne. */
+export interface BudgetData {
+  subscriptions: Subscription[];
+  /** Fundne abonnementer, brugeren har sagt ikke er abonnementer (nøgler). */
+  dismissed: string[];
+}
+
 export interface AppData {
   version: 1;
   settings: Settings;
@@ -258,6 +285,8 @@ export interface AppData {
   slideNotes: Record<string, Record<string, string>>;
   /** header-signatur -> kolonnemapping. */
   importProfiles: Record<string, ColumnMapping>;
+  /** Dagligt budget (abonnementer og faste udgifter). Mangler i ældre data. */
+  budget?: BudgetData;
 }
 
 export const bankKey = (cat?: string, sub?: string) => `${cat ?? ''}|${sub ?? ''}`;
