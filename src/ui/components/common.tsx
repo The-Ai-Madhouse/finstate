@@ -683,7 +683,7 @@ function pickModeFor(e: Engine, tx: Tx, period?: Period): Omit<LinkPick, 'txId'>
 }
 
 /** Kan transaktionen vælges som den anden i et par? (Bank: en anden konto og modsat retning.) */
-function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
+export function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
   if (other.id === pick.txId) return false;
   const src = txs.find((t) => t.id === pick.txId);
   if (!src) return false;
@@ -693,7 +693,7 @@ function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
 }
 
 /** Vælg/fravælg en transaktion. Ved en overførsel mellem dine konti er der kun én modpost – et nyt valg erstatter det gamle. */
-function togglePick(pick: LinkPick, otherId: string) {
+export function togglePick(pick: LinkPick, otherId: string) {
   const cur = pick.others ?? [];
   const others = cur.includes(otherId) ? cur.filter((x) => x !== otherId) : pick.mode === 'bank' ? [otherId] : [...cur, otherId];
   useStore.getState().setLinkPick({ ...pick, others });
@@ -942,6 +942,11 @@ export function linkTargetProps(pick: LinkPick | undefined, txId: string) {
   };
 }
 
+/** Forskellen på det valgte: "går op" eller beløbet, der bliver tilbage. */
+export function DiffPill({ sum }: { sum: number }) {
+  return <span className={`diff-pill ${sum === 0 ? 'zero' : ''}`}>{sum === 0 ? '✓ Går op' : <>Forskel <b className="num">{kr2f(sum)}</b></>}</span>;
+}
+
 /** Banner øverst, mens man vælger: hvilken transaktion man knytter fra – og Esc/Annullér. */
 export function LinkPickBanner() {
   const pick = useStore((s) => s.linkPick);
@@ -971,10 +976,22 @@ export function LinkPickBanner() {
         : pick.mode === 'bank'
           ? <>⇄ Klik på modposten til <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) – på en anden af dine konti.</>
           : <>⇄ Klik på dem, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med – vælg gerne flere, eller søg dem frem i søgefeltet.</>}
-        {' '}{chosen.length > 0 && <b>{chosen.length} valgt{chosen.length > 1 ? 'e' : ''} · i alt {kr2f(chosen.reduce((s, t) => s + t.amount, tx.amount))}</b>}</span>
+      </span>
       <span className="spacer" />
       <button className="btn sm" onClick={() => setLinkPick(undefined)}>Annullér (Esc)</button>
       <button className="btn sm primary" disabled={!chosen.length} onClick={() => completePick(pick)}>Par {chosen.length ? `${chosen.length} valgte ` : ''}(Enter)</button>
+      {chosen.length > 0 && (
+        <div className="link-chosen">
+          {chosen.map((t) => (
+            <span key={t.id} className="link-chip" title={t.text}>
+              {dateShort(t.date)} {t.text.length > 28 ? `${t.text.slice(0, 27)}…` : t.text} <b className="num">{kr2f(t.amount)}</b>
+              <button aria-label={`Fravælg ${t.text}`} onClick={() => togglePick(pick, t.id)}>✕</button>
+            </span>
+          ))}
+          <span className="spacer" />
+          <DiffPill sum={chosen.reduce((s, t) => s + t.amount, tx.amount)} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { dateShort } from '../../domain/format';
+import { dateShort, kr2f } from '../../domain/format';
 import type { Classification, Tx } from '../../domain/types';
 import { linkAll, pairBank, pairOnPost, pairPlain, setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { CategoryCombo, ClassEditor, Money, isComplete } from './common';
+import { CategoryCombo, ClassEditor, DiffPill, Money, SearchCombo, isComplete, validPick } from './common';
 
 /**
  * Par to transaktioner – med samme valg som i kategoriseringen (udgift/indtægt eller intern), der gælder for begge.
@@ -78,12 +78,24 @@ function PairDialogInner() {
     close();
   };
   saveRef.current = save;
+  // Vælg videre: tilføj eller fjern transaktioner, inden der parres. En overførsel mellem dine konti har kun én modpost.
+  const setOthers = (ids: string[]) => useStore.getState().setPairDraft({ pick, otherIds: ids });
+  const canAdd = pick.mode !== 'bank';
+  const addOptions = canAdd ? e.data.txs
+    .filter((t) => t.date >= period.start && t.date <= period.end && !otherIds.includes(t.id) && validPick(pick, t, e.data.txs))
+    .sort((x, y) => Math.abs(x.amount + sum) - Math.abs(y.amount + sum) || Math.abs(Date.parse(x.date) - Date.parse(a.date)) - Math.abs(Date.parse(y.date) - Date.parse(a.date)))
+    .slice(0, 400)
+    .map((t) => ({ id: t.id, label: `${dateShort(t.date)} · ${t.text} · ${kr2f(t.amount)}`, hint: `· ${acc(t.accountId)?.name ?? ''}${t.amount + sum === 0 ? ' · går op' : ''}` })) : [];
+  const backToList = () => { close(); useStore.getState().setLinkPick({ ...pick, others: otherIds }); };
   const line = (t: Tx) => (
     <div className="row small pair-line">
       <span className="muted" style={{ minWidth: 64 }}>{dateShort(t.date)}</span>
       <span className="muted" style={{ minWidth: 110 }}>{acc(t.accountId)?.name}</span>
       <span className="grow ellipsis" title={t.text}>{t.text}</span>
       <Money v={t.amount} decimals colored />
+      {t.id !== a.id
+        ? <button className="pair-x" disabled={others.length < 2} title={others.length < 2 ? 'Der skal være mindst én at parre med' : 'Fravælg'} aria-label={`Fravælg ${t.text}`} onClick={() => setOthers(otherIds.filter((id) => id !== t.id))}>✕</button>
+        : <span className="pair-x" aria-hidden />}
     </div>
   );
   return (
@@ -94,10 +106,17 @@ function PairDialogInner() {
           <button className="btn sm ghost" onClick={close} aria-label="Luk">✕</button>
         </div>
         {all.map((t) => <div key={t.id}>{line(t)}</div>)}
+        {canAdd && (
+          <div className="row small pair-add">
+            <SearchCombo className="sm grow" options={addOptions} value={undefined} placeholder="＋ Tilføj flere…" searchPlaceholder="Søg dato, tekst eller beløb…"
+              ariaLabel="Tilføj en transaktion" emptyText="Ingen transaktion matcher" onChange={(id) => { if (id) setOthers([...otherIds, id]); }} />
+            <button className="btn sm ghost" onClick={backToList} title="Luk vinduet og vælg videre ved at klikke i listen – det valgte bevares">← Vælg i listen</button>
+          </div>
+        )}
         <div className="row pair-sum">
-          <b>Forskel</b>
+          <b>{all.length} transaktioner</b>
           <span className="spacer" />
-          {zero ? <span className="chip user">✓ Går op</span> : <b><Money v={sum} decimals signed /></b>}
+          <DiffPill sum={sum} />
         </div>
 
         <ClassEditor value={cls} onChange={(c) => setCls(c)} amount={zero ? a.amount : sum} accountId={a.accountId} compact />
