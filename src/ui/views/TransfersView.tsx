@@ -1,6 +1,6 @@
 import { clsOfLine } from '../../domain/classify';
 import { NoPeriod } from '../components/PeriodPrompt';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import type { Account, Classification, Period, Tx } from '../../domain/types';
@@ -8,7 +8,7 @@ import { textMatches } from '../../domain/txfilter';
 import { transitName } from '../../domain/ledger';
 import { carriedTransit, transferInfo, transitCandidates, type CarriedTransit } from '../../domain/transfers';
 import { addDays, dayDiff } from '../../domain/util';
-import { pairBank, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
+import { pairBank, pairBankMany, setManual, unpairTxs, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { AccountSelect, ClassEditor, Empty, InfoBox, Money, SearchCombo, isComplete } from '../components/common';
 import { SettleOverview, setPostSettle } from '../components/SettlePanel';
@@ -98,6 +98,48 @@ function Internal() {
     .filter((i) => !q.trim() || txsOf(i).some((t) => textMatches(t, q)) || (i.kind !== 'pair' && !!i.target && i.target.name.toLowerCase().includes(q.trim().toLowerCase())))
     .sort((a, b) => (txsOf(a)[0].date < txsOf(b)[0].date ? -1 : 1));
 
+  // Forslag til "Mangler modpost": samme beløb på en anden konto, nærmeste dato – hver modpost bruges kun én gang.
+  // Står begge sider som "mangler modpost", hører de to rækker til samme forslag.
+  const suggestion = new Map<string, { key: string; a: Tx; b: Tx }>();
+  for (const i of items) {
+    if (i.kind !== 'missing' || suggestion.has(i.t.id)) continue;
+    const t = i.t;
+    const best = data.txs
+      .filter((o) => o.amount === -t.amount && o.accountId !== t.accountId && inPeriod(o, period) && Math.abs(dayDiff(t.date, o.date)) <= 60
+        && !e.resolved.get(o.id)!.pairId && !suggestion.has(o.id))
+      .sort((a, b) => Math.abs(dayDiff(t.date, a.date)) - Math.abs(dayDiff(t.date, b.date)))[0];
+    if (!best) continue;
+    const sug = { key: [t.id, best.id].sort().join('|'), a: t, b: best };
+    suggestion.set(t.id, sug);
+    suggestion.set(best.id, sug);
+  }
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const shownSugs = [...new Map(shown.flatMap((i) => (i.kind === 'missing' && suggestion.get(i.t.id) ? [suggestion.get(i.t.id)!] : [])).map((x) => [x.key, x])).values()];
+  const chosen = shownSugs.filter((x) => picked.has(x.key));
+  const togglePick = (key: string) => setPicked((p) => { const n = new Set(p); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  const allPicked = shownSugs.length > 0 && chosen.length === shownSugs.length;
+  const pairChosen = () => {
+    if (!chosen.length) return;
+    pairBankMany(chosen.map((x) => [x.a.id, x.b.id]));
+    setPicked(new Set());
+  };
+  // Enter parrer de valgte, Escape fravælger – men ikke mens man skriver i et felt.
+  const pairRef = useRef(pairChosen);
+  pairRef.current = pairChosen;
+  const hasChosen = chosen.length > 0;
+  useEffect(() => {
+    if (!hasChosen) return;
+    const onKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable || (el.tagName === 'INPUT' && (el as HTMLInputElement).type !== 'checkbox'));
+      if (typing || ev.defaultPrevented || document.querySelector('.modal-backdrop')) return;
+      if (ev.key === 'Enter') { ev.preventDefault(); pairRef.current(); }
+      else if (ev.key === 'Escape') setPicked(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasChosen]);
+
   // Teksten åbner transaktionen i Kategorisér; en post (direkte) åbnes i Aktiver & passiver.
   const side = (t: Tx) => (
     <div className="xfer-side">
@@ -171,6 +213,19 @@ function Internal() {
         <Empty>{!items.length ? 'Ingen interne overførsler i perioden.' : status === 'missing' && !q && !accountId ? 'Alle interne overførsler har en modpost. 🎉' : 'Ingen overførsler matcher.'}</Empty>
       ) : (
         <div className="xfer-list">
+          {shownSugs.length > 0 && (
+            <div className={`xfer-bulk ${hasChosen ? 'on' : ''}`}>
+              <label className="xfer-check">
+                <input type="checkbox" checked={allPicked} ref={(el) => { if (el) el.indeterminate = hasChosen && !allPicked; }}
+                  onChange={() => setPicked(allPicked ? new Set() : new Set(shownSugs.map((x) => x.key)))} />
+                <span>{allPicked ? 'Fravælg alle' : `Vælg alle forslag (${shownSugs.length})`}</span>
+              </label>
+              <span className="grow small muted">
+                {hasChosen ? <>{chosen.length} valgt · tryk <kbd>Enter</kbd> for at parre, <kbd>Esc</kbd> for at fravælge</> : 'Sæt flueben ved de forslag, der passer – og par dem alle på én gang.'}
+              </span>
+              <button className="btn sm primary" disabled={!hasChosen} onClick={pairChosen}>Par {chosen.length || ''} valgte</button>
+            </div>
+          )}
           <div className="xfer-row xfer-headrow small muted"><span>Fra</span><span /><span>Til</span><span className="num">Beløb</span><span>Status</span><span /></div>
           {shown.map((i) => {
             const amount = i.kind === 'pair' ? i.inn.amount : Math.abs(i.t.amount);
@@ -204,7 +259,7 @@ function Internal() {
                     <button className={`btn sm ${editing === i.key ? '' : 'ghost'}`} onClick={() => setEditing(editing === i.key ? undefined : i.key)}>{editing === i.key ? 'Luk' : 'Ret'}</button>
                   </span>
                 </div>
-                {i.kind === 'missing' && <PairPicker t={i.t} period={period} />}
+                {i.kind === 'missing' && <PairPicker t={i.t} period={period} sug={suggestion.get(i.t.id)} picked={!!suggestion.get(i.t.id) && picked.has(suggestion.get(i.t.id)!.key)} onPick={togglePick} />}
                 {editing === i.key && (
                   <div className="xfer-edit">
                     {txsOf(i).map((x) => <TxEdit key={x.id} t={x} />)}
@@ -221,7 +276,7 @@ function Internal() {
 }
 
 /** Mangler modpost: forslag med samme beløb – eller søg selv blandt de andre kontis transaktioner. */
-function PairPicker({ t, period }: { t: Tx; period: Period }) {
+function PairPicker({ t, period, sug, picked, onPick }: { t: Tx; period: Period; sug?: { key: string; a: Tx; b: Tx }; picked: boolean; onPick: (key: string) => void }) {
   const e = useEngine();
   const { data } = e;
   const acc = (id?: string) => data.accounts.find((a) => a.id === id)?.name ?? '';
@@ -229,13 +284,18 @@ function PairPicker({ t, period }: { t: Tx; period: Period }) {
     // Kun transaktioner i samme financial statement.
     .filter((o) => inPeriod(o, period) && o.accountId !== t.accountId && Math.sign(o.amount) === -Math.sign(t.amount) && Math.abs(dayDiff(t.date, o.date)) <= 60 && !e.resolved.get(o.id)!.pairId)
     .sort((a, b) => (Math.abs(a.amount) === Math.abs(t.amount) ? 0 : 1) - (Math.abs(b.amount) === Math.abs(t.amount) ? 0 : 1) || Math.abs(dayDiff(t.date, a.date)) - Math.abs(dayDiff(t.date, b.date)));
-  const exact = pool.filter((o) => o.amount === -t.amount).slice(0, 2);
+  // Forslaget, der kan vælges til samlet parring, står først (med flueben).
+  const other = sug && (sug.a.id === t.id ? sug.b : sug.a);
+  const exact = [...(other ? [other] : []), ...pool.filter((o) => o.amount === -t.amount && o.id !== other?.id)].slice(0, 2);
   const options = pool.slice(0, 300).map((o) => ({ id: o.id, label: `${dateShort(o.date)} · ${acc(o.accountId)} · ${o.text}`, hint: `${kr(Math.abs(o.amount))}${o.amount !== -t.amount ? ' (andet beløb)' : ''}` }));
   return (
     <div className="xfer-pick row small">
       {exact.map((c) => (
         <span key={c.id} className="row" style={{ gap: 6 }}>
-          <span className="ink2">Forslag: {acc(c.accountId)} {dateShort(c.date)} "{c.text}"</span>
+          {c.id === other?.id
+            ? <label className="xfer-check ink2"><input type="checkbox" checked={picked} onChange={() => onPick(sug!.key)} aria-label={`Vælg forslaget ${acc(c.accountId)} ${dateShort(c.date)}`} />
+                <span>Forslag: {acc(c.accountId)} {dateShort(c.date)} "{c.text}"</span></label>
+            : <span className="ink2">Forslag: {acc(c.accountId)} {dateShort(c.date)} "{c.text}"</span>}
           <button className="btn sm primary" onClick={() => pairBank(t.id, c.id)}>Par</button>
         </span>
       ))}

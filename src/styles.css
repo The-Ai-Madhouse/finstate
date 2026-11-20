@@ -729,6 +729,13 @@ tr.drawer-row > td { background: var(--surface-2); padding: 0 12px 14px; box-sha
 .xfer-side.expected { opacity: 0.75; border: 1px dashed var(--line-strong); border-radius: 6px; padding: 2px 8px; }
 .xfer-arrow { color: var(--muted); font-size: 16px; text-align: center; }
 .xfer-actions { gap: 4px; flex-wrap: nowrap; justify-content: flex-end; }
+.xfer-bulk { position: sticky; top: 64px; z-index: 3; box-shadow: var(--shadow); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 8px; border-radius: var(--radius-sm); background: var(--surface-2); transition: background 0.2s var(--ease); }
+.xfer-bulk.on { background: var(--butter); color: var(--pastel-ink); }
+.xfer-bulk.on .muted { color: color-mix(in srgb, var(--pastel-ink) 75%, transparent); }
+.xfer-bulk kbd { font: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--surface); color: var(--ink); box-shadow: inset 0 -1px 0 var(--line-strong); }
+.xfer-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; }
+.xfer-check input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; flex: none; }
+.xfer-pick .xfer-check { font-weight: 400; }
 .xfer-pick { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); gap: 10px; flex-wrap: wrap; }
 .xfer-edit { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .xfer-edit-line { display: flex; flex-direction: column; gap: 4px; }

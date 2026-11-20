@@ -125,33 +125,40 @@ export function pairPlain(aId: string, bId: string, categoryId: string) {
  * det, der svarer til modposten, er intern overførsel – resten bogføres i den valgte kategori.
  */
 export function pairBank(aId: string, bId: string, restCategoryId?: string) {
-  update((d) => {
-    const a = d.txs.find((t) => t.id === aId), b = d.txs.find((t) => t.id === bId);
-    if (!a || !b) return d;
-    const rest = a.amount + b.amount;
-    const big = Math.abs(a.amount) >= Math.abs(b.amount) ? a : b;
-    const small = big === a ? b : a;
-    return {
-      ...d,
-      txs: d.txs.map((t) => {
-        if (t.id !== aId && t.id !== bId) return t;
-        const other = t.id === aId ? b : a;
-        const n: Tx = { ...t, pairWith: other.id };
-        delete n.noAutoPair;
-        if (rest && restCategoryId && t.id === big.id) {
-          n.splits = [
-            { type: 'internal', targetAccountId: small.accountId, amount: -small.amount },
-            { type: plType(d, restCategoryId, rest), categoryId: restCategoryId, amount: rest },
-          ];
-          delete n.manual;
-        } else {
-          n.manual = { type: 'internal', targetAccountId: other.accountId };
-          delete n.splits;
-        }
-        return n;
-      }),
-    };
-  });
+  update((d) => pairBankData(d, aId, bId, restCategoryId));
+}
+
+/** Par mange overførsler på én gang (samme beløb) – én ændring, der kan fortrydes samlet. */
+export function pairBankMany(pairs: [string, string][]) {
+  update((d) => pairs.reduce((n, [a, b]) => pairBankData(n, a, b), d));
+}
+
+function pairBankData(d: AppData, aId: string, bId: string, restCategoryId?: string): AppData {
+  const a = d.txs.find((t) => t.id === aId), b = d.txs.find((t) => t.id === bId);
+  if (!a || !b) return d;
+  const rest = a.amount + b.amount;
+  const big = Math.abs(a.amount) >= Math.abs(b.amount) ? a : b;
+  const small = big === a ? b : a;
+  return {
+    ...d,
+    txs: d.txs.map((t) => {
+      if (t.id !== aId && t.id !== bId) return t;
+      const other = t.id === aId ? b : a;
+      const n: Tx = { ...t, pairWith: other.id };
+      delete n.noAutoPair;
+      if (rest && restCategoryId && t.id === big.id) {
+        n.splits = [
+          { type: 'internal', targetAccountId: small.accountId, amount: -small.amount },
+          { type: plType(d, restCategoryId, rest), categoryId: restCategoryId, amount: rest },
+        ];
+        delete n.manual;
+      } else {
+        n.manual = { type: 'internal', targetAccountId: other.accountId };
+        delete n.splits;
+      }
+      return n;
+    }),
+  };
 }
 
 /** Ophæv en parring. En automatisk parring huskes som fravalgt, så den ikke kommer igen. */
