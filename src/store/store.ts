@@ -51,8 +51,8 @@ interface State {
   linkPick?: LinkPick;
   setLinkPick: (pick?: LinkPick) => void;
   /** Valgt par, der venter på at blive bekræftet (og evt. hvor resten skal hen). */
-  pairDraft?: { pick: LinkPick; otherId: string };
-  setPairDraft: (draft?: { pick: LinkPick; otherId: string }) => void;
+  pairDraft?: { pick: LinkPick; otherIds: string[] };
+  setPairDraft: (draft?: { pick: LinkPick; otherIds: string[] }) => void;
   /** Skift financial statement. replace: automatisk skift (fx efter sletning) – ingen ny post i historikken. */
   setPeriod: (id?: string, opts?: { replace?: boolean }) => void;
 }
@@ -61,7 +61,11 @@ interface State {
  * Vælg en anden transaktion (søg eller klik i listen):
  *  plain = almindelige transaktioner (fx udlæg og indbetaling) · post = par på en afstemt post (fx udlæg ↔ tilbagebetaling) · bank = find modposten til en overførsel mellem dine konti
  */
-export type LinkPick = { txId: string; mode: 'plain' | 'post' | 'bank'; postId?: string; periodId?: string };
+export type LinkPick = {
+  txId: string; mode: 'plain' | 'post' | 'bank'; postId?: string; periodId?: string;
+  /** De valgte (klik for at vælge/fravælge, Enter for at parre). En overførsel mellem dine konti har kun én modpost. */
+  others?: string[];
+};
 
 export type LedgerFilter = TxFilter;
 export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status: 'all', withNote: false, sort: 'date-asc' };

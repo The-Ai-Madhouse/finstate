@@ -692,11 +692,19 @@ function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
   return !src.link || other.link !== src.link;
 }
 
-/** Den anden er valgt: vis parringen, så man kan se om det går op – og skrive, hvor en evt. rest skal hen. */
-function completePick(pick: LinkPick, otherId: string) {
+/** Vælg/fravælg en transaktion. Ved en overførsel mellem dine konti er der kun én modpost – et nyt valg erstatter det gamle. */
+function togglePick(pick: LinkPick, otherId: string) {
+  const cur = pick.others ?? [];
+  const others = cur.includes(otherId) ? cur.filter((x) => x !== otherId) : pick.mode === 'bank' ? [otherId] : [...cur, otherId];
+  useStore.getState().setLinkPick({ ...pick, others });
+}
+
+/** De valgte er klar: vis parringen, så man kan se om det går op – og skrive, hvor en evt. rest skal hen. */
+export function completePick(pick: LinkPick) {
+  if (!pick.others?.length) return;
   const { setLinkPick, setPairDraft } = useStore.getState();
   setLinkPick(undefined);
-  setPairDraft({ pick, otherId });
+  setPairDraft({ pick, otherIds: pick.others });
 }
 
 /**
@@ -728,7 +736,7 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   const inPeriod = (t: Tx) => !period || (t.date >= period.start && t.date <= period.end);
   const options = pick
     ? txs
-      .filter((t) => inPeriod(t) && validPick(pick, t, txs))
+      .filter((t) => inPeriod(t) && validPick(pick, t, txs) && !pick.others?.includes(t.id))
       // Samme beløb (modsat retning) først, så nærmeste dato.
       .sort((a, b) => Number(b.amount === -tx.amount) - Number(a.amount === -tx.amount) || Math.abs(Date.parse(a.date) - Date.parse(tx.date)) - Math.abs(Date.parse(b.date) - Date.parse(tx.date)))
       .slice(0, 400)
@@ -764,9 +772,9 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
           <SearchCombo className="sm" options={options} value={undefined}
             placeholder={pick.mode === 'post' ? `Par med… (${postName})` : pick.mode === 'bank' ? 'Modposten…' : 'Par med…'}
             searchPlaceholder="Søg dato, tekst eller beløb…" ariaLabel="Vælg den anden transaktion" emptyText="Ingen transaktion matcher – eller klik på den i listen"
-            onChange={(id) => { if (id) completePick(pick, id); }} />
+            onChange={(id) => { if (id) togglePick(pick, id); }} />
           <button className="btn sm ghost" onClick={() => setLinkPick(undefined)} aria-label="Annullér">✕</button>
-          <span className="small muted">eller klik på den i listen</span>
+          <span className="small muted">{pick.mode === 'bank' ? 'eller klik på den i listen' : 'eller klik på dem i listen – vælg gerne flere'}</span>
         </span>
       ) : (
         <span className="row" style={{ gap: 10 }}>
@@ -921,13 +929,15 @@ export function linkTargetProps(pick: LinkPick | undefined, txId: string) {
   const txs = useStore.getState().data.txs;
   const other = txs.find((t) => t.id === txId);
   if (!other || !validPick(pick, other, txs)) return { className: 'link-disabled' };
+  const on = !!pick.others?.includes(txId);
   return {
-    className: 'link-target',
-    title: 'Klik for at parre med den valgte transaktion',
+    className: `link-target ${on ? 'link-picked' : ''}`,
+    title: on ? 'Valgt – klik for at fravælge' : 'Klik for at vælge den – tryk Enter, når du har valgt dem, der hører sammen',
+    'aria-selected': on,
     onClickCapture: (ev: React.MouseEvent) => {
       ev.preventDefault();
       ev.stopPropagation();
-      completePick(pick, txId);
+      togglePick(pick, txId);
     },
   };
 }
@@ -938,10 +948,18 @@ export function LinkPickBanner() {
   const tx = useStore((s) => s.data.txs.find((t) => t.id === s.linkPick?.txId));
   const postName = useStore((s) => s.data.accounts.find((a) => a.id === s.linkPick?.postId)?.name);
   const setLinkPick = useStore((s) => s.setLinkPick);
+  const all = useStore((s) => s.data.txs);
+  const chosen = (pick?.others ?? []).map((id) => all.find((t) => t.id === id)).filter((t): t is Tx => !!t);
   useEffect(() => {
     if (!pick) return;
     // I "capture"-fasen, så Esc også annullerer, når markøren står i søgefeltet (som ellers selv fanger Esc).
-    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setLinkPick(undefined); };
+    // Enter parrer de valgte – men ikke i søgefeltet, hvor Enter vælger det fremhævede.
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setLinkPick(undefined);
+      const el = ev.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+      if (ev.key === 'Enter' && !typing && pick.others?.length) { ev.preventDefault(); ev.stopPropagation(); completePick(pick); }
+    };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [pick, setLinkPick]);
@@ -949,12 +967,14 @@ export function LinkPickBanner() {
   return (
     <div className="banner info link-banner">
       <span className="grow">{pick.mode === 'post'
-        ? <>⇄ Klik på det, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med på <b>{postName}</b> – står den som noget andet, flyttes den til {postName}.</>
+        ? <>⇄ Klik på det, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med på <b>{postName}</b> – vælg gerne flere. Står de som noget andet, flyttes de til {postName}.</>
         : pick.mode === 'bank'
           ? <>⇄ Klik på modposten til <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) – på en anden af dine konti.</>
-          : <>⇄ Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med – eller søg den frem i søgefeltet.</>}</span>
+          : <>⇄ Klik på dem, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med – vælg gerne flere, eller søg dem frem i søgefeltet.</>}
+        {' '}{chosen.length > 0 && <b>{chosen.length} valgt{chosen.length > 1 ? 'e' : ''} · i alt {kr2f(chosen.reduce((s, t) => s + t.amount, tx.amount))}</b>}</span>
       <span className="spacer" />
       <button className="btn sm" onClick={() => setLinkPick(undefined)}>Annullér (Esc)</button>
+      <button className="btn sm primary" disabled={!chosen.length} onClick={() => completePick(pick)}>Par {chosen.length ? `${chosen.length} valgte ` : ''}(Enter)</button>
     </div>
   );
 }

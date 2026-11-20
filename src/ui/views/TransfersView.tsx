@@ -306,7 +306,7 @@ function PairPicker({ t, period, sug, picked, onPick }: { t: Tx; period: Period;
           // Samme beløb: par med det samme. Andet beløb: vis parringen, så resten (fx et gebyr) kan placeres.
           const o = e.txById.get(id);
           if (o && o.amount === -t.amount) pairBank(t.id, id);
-          else useStore.getState().setPairDraft({ pick: { txId: t.id, mode: 'bank' }, otherId: id });
+          else useStore.getState().setPairDraft({ pick: { txId: t.id, mode: 'bank' }, otherIds: [id] });
         }} />
     </div>
   );

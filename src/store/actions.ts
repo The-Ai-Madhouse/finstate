@@ -66,6 +66,9 @@ export function pairTxs(aId: string, bId: string) {
   });
 }
 
+/** Læg alle transaktionerne i samme gruppe. */
+export const linkAll = (d: AppData, ids: string[]) => ids.slice(1).reduce((n, id) => linkTxs(n, ids[0], id), d);
+
 /** Indtægt eller udgift for et beløb i en kategori (en "begge veje"-kategori følger fortegnet). */
 const plType = (d: AppData, categoryId: string, amount: number): 'income' | 'expense' => {
   const c = d.categories.find((x) => x.id === categoryId);
@@ -78,20 +81,22 @@ const plType = (d: AppData, categoryId: string, amount: number): 'income' | 'exp
  * posten kommer med i periodens afstemning, og de to lægges i samme gruppe.
  * Går det ikke op, kan resten afskrives som en kategori – ellers bliver den stående på posten.
  */
-export function pairOnPost(period: Period, postId: string, aId: string, bId: string, writeOffCategoryId?: string, carry?: boolean) {
+export function pairOnPost(period: Period, postId: string, ids: string[], writeOffCategoryId?: string, carry?: boolean) {
+  const [aId] = ids;
+  const set = new Set(ids);
   update((d) => {
     const toPost = (t: Tx): Tx => {
-      if (t.id !== aId && t.id !== bId) return t;
+      if (!set.has(t.id)) return t;
       const n: Tx = { ...t, manual: { type: 'internal', targetAccountId: postId } };
       delete n.splits;
       return n;
     };
     let n: AppData = { ...d, txs: d.txs.map(toPost) };
     // Var de parret som udgift/indtægt før, er de det ikke længere.
-    for (const id of [aId, bId]) if (n.txs.find((t) => t.id === id)?.link) n = unlinkTx(n, id);
+    for (const id of ids) if (n.txs.find((t) => t.id === id)?.link) n = unlinkTx(n, id);
     n = withSettle(n, period.id, postId, true);
     const into = (n.matches ?? []).find((m) => m.accountId === postId && m.keys.includes(`tx:${aId}`) && m.keys.length > 1)?.id;
-    n = pairItems(n, postId, [`tx:${aId}`, `tx:${bId}`], into);
+    n = pairItems(n, postId, ids.map((id) => `tx:${id}`), into);
     const m = n.matches.find((x) => x.accountId === postId && x.keys.includes(`tx:${aId}`));
     // Resten: afskrives ind i samme gruppe på posten – eller tages med til næste periode.
     if (m && writeOffCategoryId) n = writeOffDifference(n, buildEngine(n).ledger, m.id, writeOffCategoryId, period);
@@ -104,19 +109,20 @@ export function pairOnPost(period: Period, postId: string, aId: string, bId: str
  * Par to almindelige transaktioner (fx et køb og en refusion, eller et udlæg og en indbetaling):
  * begge bogføres i samme kategori, så kun resten tæller i regnskabet. De markeres som parret.
  */
-export function pairPlain(aId: string, bId: string, categoryId: string) {
+export function pairPlain(ids: string[], categoryId: string) {
+  const set = new Set(ids);
   update((d) => {
     const n: AppData = {
       ...d,
       txs: d.txs.map((t) => {
-        if (t.id !== aId && t.id !== bId) return t;
+        if (!set.has(t.id)) return t;
         const x: Tx = { ...t, manual: { type: plType(d, categoryId, t.amount), categoryId } };
         delete x.splits;
         return x;
       }),
     };
     // Var de afstemt på en post før, er de det ikke længere.
-    return linkTxs(removeFromMatches(n, [`tx:${aId}`, `tx:${bId}`]), aId, bId);
+    return linkAll(removeFromMatches(n, ids.map((id) => `tx:${id}`)), ids);
   });
 }
 

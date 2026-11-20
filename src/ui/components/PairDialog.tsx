@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { dateShort } from '../../domain/format';
 import type { Classification, Tx } from '../../domain/types';
-import { pairBank, pairOnPost, pairPlain, setManual, useEngine, usePeriod } from '../../store/actions';
+import { linkAll, pairBank, pairOnPost, pairPlain, setManual, useEngine, usePeriod } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { CategoryCombo, ClassEditor, Money, isComplete } from './common';
-import { linkTxs } from '../../domain/links';
 
 /**
  * Par to transaktioner – med samme valg som i kategoriseringen (udgift/indtægt eller intern), der gælder for begge.
@@ -22,7 +21,7 @@ export function PairDialog() {
     return () => window.removeEventListener('keydown', onKey);
   }, [draft]);
   if (!draft) return null;
-  return <PairDialogInner key={`${draft.pick.txId}|${draft.otherId}`} />;
+  return <PairDialogInner key={`${draft.pick.txId}|${draft.otherIds.join(',')}`} />;
 }
 
 function PairDialogInner() {
@@ -30,15 +29,17 @@ function PairDialogInner() {
   const period = usePeriod();
   const draft = useStore((s) => s.pairDraft)!;
   const close = () => useStore.getState().setPairDraft(undefined);
-  const { pick, otherId } = draft;
+  const { pick, otherIds } = draft;
   const a = e.txById.get(pick.txId);
-  const b = e.txById.get(otherId);
-  const sum = (a?.amount ?? 0) + (b?.amount ?? 0); // fra bankens side
+  const others = otherIds.map((id) => e.txById.get(id)).filter((t): t is Tx => !!t);
+  const b = others[0];
+  const all = a ? [a, ...others] : others;
+  const sum = all.reduce((s, t) => s + t.amount, 0); // fra bankens side
   // Samme valg som i kategoriseringen – forudfyldt med det, en af dem allerede er.
   const [cls, setCls] = useState<Classification>(() => {
     if (pick.mode === 'bank' && a && b) return { type: 'internal', targetAccountId: b.accountId };
     if (pick.postId) return { type: 'internal', targetAccountId: pick.postId };
-    for (const t of [a, b]) {
+    for (const t of all) {
       const l = t && e.resolved.get(t.id)?.lines.find((x) => (x.type === 'internal' && x.targetAccountId) || x.categoryId);
       if (l?.type === 'internal' && l.targetAccountId !== a?.accountId) return { type: 'internal', targetAccountId: l.targetAccountId };
       if (l?.categoryId) return { type: l.type, categoryId: l.categoryId };
@@ -47,6 +48,17 @@ function PairDialogInner() {
   });
   const [writeOff, setWriteOff] = useState(false);
   const [writeOffCat, setWriteOffCat] = useState<string>();
+  // Enter bekræfter parringen (men ikke mens man skriver i et felt eller vælger i en liste).
+  const saveRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+      if (ev.key === 'Enter' && !typing && !ev.defaultPrevented) { ev.preventDefault(); saveRef.current(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   if (!a || !b || !period) return null;
   const acc = (id?: string) => e.data.accounts.find((x) => x.id === id);
   const zero = sum === 0;
@@ -58,12 +70,14 @@ function PairDialogInner() {
   const save = () => {
     if (!ok) return;
     const wo = canWriteOff && writeOff ? writeOffCat : undefined;
-    if (!internal) pairPlain(a.id, b.id, cls.categoryId!);
-    else if (target?.kind === 'tracked') pairOnPost(period, target.id, a.id, b.id, wo);
-    else if (target && (target.id === a.accountId || target.id === b.accountId || target.kind === 'bank')) pairBank(a.id, b.id, wo);
-    else { setManual([a.id, b.id], cls); useStore.getState().update((d) => linkTxs(d, a.id, b.id)); }
+    const ids = all.map((t) => t.id);
+    if (!internal) pairPlain(ids, cls.categoryId!);
+    else if (target?.kind === 'tracked') pairOnPost(period, target.id, ids, wo);
+    else if (others.length === 1 && target && (target.id === a.accountId || target.id === b.accountId || target.kind === 'bank')) pairBank(a.id, b.id, wo);
+    else { setManual(ids, cls); useStore.getState().update((d) => linkAll(d, ids)); }
     close();
   };
+  saveRef.current = save;
   const line = (t: Tx) => (
     <div className="row small pair-line">
       <span className="muted" style={{ minWidth: 64 }}>{dateShort(t.date)}</span>
@@ -76,11 +90,10 @@ function PairDialogInner() {
     <div className="modal-backdrop" onMouseDown={close}>
       <div className="modal card pair-modal" role="dialog" aria-label="Par transaktioner" onMouseDown={(ev) => ev.stopPropagation()}>
         <div className="card-head">
-          <h2 className="grow">Par transaktionerne</h2>
+          <h2 className="grow">Par {all.length > 2 ? `${all.length} transaktioner` : 'transaktionerne'}</h2>
           <button className="btn sm ghost" onClick={close} aria-label="Luk">✕</button>
         </div>
-        {line(a)}
-        {line(b)}
+        {all.map((t) => <div key={t.id}>{line(t)}</div>)}
         <div className="row pair-sum">
           <b>Forskel</b>
           <span className="spacer" />
@@ -101,7 +114,7 @@ function PairDialogInner() {
 
         <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
           <button className="btn sm" onClick={close}>Annullér</button>
-          <button className="btn sm primary" disabled={!ok} onClick={save}>⇄ Par</button>
+          <button className="btn sm primary" disabled={!ok} onClick={save}>⇄ Par (Enter)</button>
         </div>
       </div>
     </div>

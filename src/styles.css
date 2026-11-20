@@ -771,6 +771,7 @@ tr.settle-primo td { font-style: italic; color: var(--ink-2); }
 .link-target { cursor: copy; outline: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -2px; }
 .link-target:hover { background: color-mix(in srgb, var(--accent) 14%, transparent) !important; outline: 2px solid var(--accent); }
 .link-target *:not(td) { pointer-events: none; }
+.link-target.link-picked, .link-target.link-picked:hover { background: color-mix(in srgb, var(--accent) 20%, transparent) !important; outline: 2px solid var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
 .link-source { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
 /* Overførsler: penge undervejs fra forrige periode */
