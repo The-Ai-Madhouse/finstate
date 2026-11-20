@@ -55,12 +55,12 @@ export function App() {
       <PairDialog />
       <NavCallout />
       <nav className="nav" aria-label="Hovedmenu">
-        <div className="brand">◐ Finstate <small>lokalt & privat</small></div>
+        <div className="brand"><span className="brand-mark" aria-hidden>◐</span>Finstate <small>lokalt & privat</small></div>
         <StatementSwitcher />
         <NavItem id="overview" label="Overblik" icon={<span className="step">⌂</span>} />
 
         <div className="nav-label">Dagligt budget</div>
-        <NavItem id="budget" label="Abonnementer & regninger" icon={<span className="step bud-ic">◷</span>} />
+        <NavItem id="budget" label="Abonnementer" icon={<span className="step bud-ic">◷</span>} />
 
         <div className="nav-label">Arbejdsgang</div>
         {WORK.map((w) => {
@@ -91,7 +91,7 @@ export function App() {
       </nav>
       <div className="main">
         <TopBar />
-        <div className="content">
+        <div className="content" data-view={view} key={view}>
           {view !== 'overview' && view !== 'budget' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
           {view === 'overview' && <OverviewView />}
           {view === 'import' && <ImportView />}

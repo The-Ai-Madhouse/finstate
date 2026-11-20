@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { AuthGate, Login } from './ui/components/AuthGate';
 import { flushSave, initHistory, useStore } from './store/store';
+import '@fontsource-variable/plus-jakarta-sans';
 import './styles.css';
 
 /**

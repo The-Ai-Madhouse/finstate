@@ -58,16 +58,21 @@ export function OverviewView() {
 
   return (
     <div className="stack">
-      <div className="row">
-        <h1>Financial statement {period.name}</h1>
-        <span className="muted">{dateDa(period.start)} – {dateDa(period.end)}{prevP ? ` · sammenlignes med ${prevP.name}` : ''}</span>
-      </div>
+      <section className="hero" aria-label={`Financial statement ${period.name}`}>
+        <div>
+          <div className="hero-kicker">Financial statement {period.name} · {dateDa(period.start)} – {dateDa(period.end)}</div>
+          <div className="hero-big">{hasData ? kr(k.netWorth) : period.name}</div>
+          <div className="hero-sub">
+            {hasData
+              ? <>i nettoformue (egenkapital){prevP ? <> · sammenlignes med <b>{prevP.name}</b></> : ''}</>
+              : `Nøgletal, status og udvikling vises her, når du har importeret bankdata for ${period.name}.`}
+          </div>
+        </div>
+        {hasData && <span className={`hero-pill ${k.netWorthDelta < 0 ? 'down' : ''}`}>{k.netWorthDelta >= 0 ? '↑' : '↓'} {signedKr(k.netWorthDelta)} i perioden</span>}
+      </section>
       {!allDone && <GuideCard />}
-      {!hasData ? (
-        <p className="small muted">Nøgletal, status og udvikling vises her, når du har importeret bankdata for {period.name}.</p>
-      ) : (<>
+      {hasData && (<>
       <div className="tiles">
-        <Tile label="Nettoformue (egenkapital)" value={kr(k.netWorth)} delta={`${signedKr(k.netWorthDelta)} i perioden`} deltaGood={k.netWorthDelta >= 0} />
         <Tile label="Indtægter" value={kr(k.income)} delta={kp ? `${signedKr(k.income - kp.income)} vs. ${prevP!.name}` : undefined} deltaGood={kp ? k.income >= kp.income : undefined} />
         <Tile label="Udgifter" value={kr(k.expense)} delta={kp ? `${signedKr(k.expense - kp.expense)} vs. ${prevP!.name}` : undefined} deltaGood={kp ? k.expense <= kp.expense : undefined} />
         <Tile label="Opsparingsrate" value={k.savingsRate === null ? '–' : pctf(k.savingsRate)} delta={kp?.savingsRate != null && k.savingsRate !== null ? `${kp.savingsRate <= k.savingsRate ? '+' : '−'}${pctf(Math.abs(k.savingsRate - kp.savingsRate))}-point` : undefined} deltaGood={kp?.savingsRate != null && k.savingsRate !== null ? k.savingsRate >= kp.savingsRate : undefined} />

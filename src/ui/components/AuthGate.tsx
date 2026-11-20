@@ -46,7 +46,7 @@ export function Screen({ title, children, wide }: { title: string; children: Rea
   return (
     <div className="auth-page">
       <div className={`card auth-card ${wide ? 'wide' : ''}`}>
-        <div className="auth-brand">◐ Finstate</div>
+        <div className="auth-brand"><span className="brand-mark" aria-hidden>◐</span>Finstate</div>
         <h2>{title}</h2>
         {children}
       </div>
