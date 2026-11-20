@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { dateShort } from '../../domain/format';
-import { activeFilterCount, amountActive, type TxSort } from '../../domain/txfilter';
+import { accountsOf, activeFilterCount, amountActive, categoriesOf, statusesOf, typesOf, type TxSort, type TxStatus, type TxType } from '../../domain/txfilter';
 import { useStore, type LedgerFilter } from '../../store/store';
-import { AccountSelect, CategoryCombo, LinkPickBanner, categoryLabel } from '../components/common';
+import { CategoryCombo, LinkPickBanner, categoryLabel } from '../components/common';
 
 /**
  * Filtre og sortering i Kategorisér – som overskrifterne i et regneark: hver kolonne viser, hvad den filtrerer på,
@@ -79,6 +79,17 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
     return () => { document.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
   }, [open]);
 
+  const types = typesOf(f), statuses = statusesOf(f), cats = categoriesOf(f), accs = accountsOf(f);
+  const bankAccounts = accounts.filter((a) => a.kind === 'bank');
+  const accName = (id: string) => accounts.find((a) => a.id === id)?.name ?? '?';
+  /** "Udgift, Intern" – eller "3 valgt", når der er mange. */
+  const list = (labels: string[], none: string) => (!labels.length ? none : labels.length <= 2 ? labels.join(', ') : `${labels.length} valgt`);
+  // Flervalg: skriv listen og ryd den gamle enkeltværdi.
+  const setTypes = (v: TxType[]) => set({ types: v, type: 'all' });
+  const setStatuses = (v: TxStatus[]) => set({ statuses: v, status: 'all' });
+  const setCats = (v: string[]) => set({ categoryIds: v, categoryId: undefined });
+  const setAccs = (v: string[]) => set({ accountIds: v, accountId: undefined });
+  const toggle = <T,>(xs: T[], x: T) => (xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x]);
   const amt = (s?: string) => (s?.trim() ? `${s.trim()} kr.` : '…');
   /** Det, kolonnen filtrerer på lige nu – vises under kolonnens navn. */
   const summary = (c: Col): { text: string; on: boolean } => {
@@ -94,18 +105,18 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
         if (f.amountOp === 'eq') return { text: `= ${amt(f.min)}`, on: true };
         return { text: `${f.min?.trim() || '0'} – ${f.max?.trim() || '∞'} kr.`, on: true };
       }
-      case 'type': return { text: TYPE_LABEL[f.type], on: f.type !== 'all' };
-      case 'category': return f.categoryId ? { text: categoryLabel(categories, f.categoryId), on: true } : { text: 'Alle', on: false };
-      case 'account': return f.accountId ? { text: accounts.find((a) => a.id === f.accountId)?.name ?? '?', on: true } : { text: 'Alle konti', on: false };
-      case 'status': return { text: STATUS_LABEL[f.status], on: f.status !== 'all' };
+      case 'type': return { text: list(types.map((t) => TYPE_LABEL[t]), 'Alle typer'), on: types.length > 0 };
+      case 'category': return { text: list(cats.map((c) => categoryLabel(categories, c)), 'Alle'), on: cats.length > 0 };
+      case 'account': return { text: list(accs.map(accName), 'Alle konti'), on: accs.length > 0 };
+      case 'status': return { text: list(statuses.map((s) => STATUS_LABEL[s]), 'Alle'), on: statuses.length > 0 };
       case 'note': return f.withNote ? { text: 'Kun med note', on: true } : { text: 'Alle', on: false };
     }
   };
   const clear = (c: Col) => {
     const patch: Partial<LedgerFilter> =
       c === 'date' ? { from: undefined, to: undefined } : c === 'text' ? { q: '' } : c === 'amount' ? { min: '', max: '', amountOp: undefined }
-      : c === 'type' ? { type: 'all' } : c === 'category' ? { categoryId: undefined } : c === 'account' ? { accountId: undefined }
-      : c === 'status' ? { status: 'all' } : { withNote: false };
+      : c === 'type' ? { type: 'all', types: [] } : c === 'category' ? { categoryId: undefined, categoryIds: [] } : c === 'account' ? { accountId: undefined, accountIds: [] }
+      : c === 'status' ? { status: 'all', statuses: [] } : { withNote: false };
     set(patch);
   };
 
@@ -124,6 +135,21 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
       </div>
     );
   };
+
+  /** Flervalg: "Alle" eller en eller flere afkrydsede værdier. */
+  const multi = <T extends string>(label: string, opts: [T, string][], value: T[], onSet: (v: T[]) => void) => (
+    <div className="colfield" role="group" aria-label={label}>
+      <span className="colfield-label">Vælg en eller flere</span>
+      <div className="colchecks">
+        <label className={`colcheck ${!value.length ? 'on' : ''}`}><input type="checkbox" checked={!value.length} onChange={() => onSet([])} /> Alle</label>
+        {opts.map(([v, l]) => (
+          <label key={v} className={`colcheck ${value.includes(v) ? 'on' : ''}`}>
+            <input type="checkbox" checked={value.includes(v)} onChange={() => onSet(toggle(value, v))} /> {l}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
 
   /** Kolonnens indstillinger – bruges både i det lille vindue og i "Alle filtre". */
   const editor = (c: Col, autoFocus: boolean) => {
@@ -174,10 +200,20 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
           {sortSeg('amount', [['none', 'Neutral'], ['amount-desc', '↓ Største først'], ['amount-asc', '↑ Mindste først']])}
         </>);
       }
-      case 'type': return <div className="colfield">{seg(f.type, (Object.keys(TYPE_LABEL) as LedgerFilter['type'][]).map((k) => [k, TYPE_LABEL[k]]), (type) => set({ type }), 'Type')}</div>;
-      case 'status': return <div className="colfield">{seg(f.status, (Object.keys(STATUS_LABEL) as LedgerFilter['status'][]).map((k) => [k, STATUS_LABEL[k]]), (status) => set({ status }), 'Status')}</div>;
-      case 'category': return <div className="colfield"><CategoryCombo className="sm" value={f.categoryId} onChange={(categoryId) => set({ categoryId })} allowClear="Alle kategorier" ariaLabel="Filtrér på kategori" /></div>;
-      case 'account': return <div className="colfield"><AccountSelect className="sm" value={f.accountId} onChange={(accountId) => set({ accountId })} placeholder="Alle konti" filter={(a) => a.kind === 'bank'} /></div>;
+      case 'type': return multi('Type', (['income', 'expense', 'internal'] as TxType[]).map((k) => [k, TYPE_LABEL[k]]), types, setTypes);
+      case 'status': return multi('Status', (['pending', 'uncat', 'done'] as TxStatus[]).map((k) => [k, STATUS_LABEL[k]]), statuses, setStatuses);
+      case 'account': return multi('Konto', bankAccounts.map((a) => [a.id, a.name]), accs, setAccs);
+      case 'category': return (
+        <div className="colfield">
+          <span className="colfield-label">Vælg en eller flere <span className="muted">(underkategorier tæller med)</span></span>
+          {cats.length > 0 && (
+            <div className="colchips">
+              {cats.map((c) => <span key={c} className="link-chip">{categoryLabel(categories, c)}<button aria-label={`Fjern ${categoryLabel(categories, c)}`} onClick={() => setCats(cats.filter((x) => x !== c))}>✕</button></span>)}
+            </div>
+          )}
+          <CategoryCombo className="sm" value={undefined} onChange={(id) => { if (id && !cats.includes(id)) setCats([...cats, id]); }} placeholder={cats.length ? '＋ Tilføj kategori…' : 'Alle kategorier – vælg…'} ariaLabel="Tilføj kategori til filteret" />
+        </div>
+      );
       case 'note': return <div className="colfield"><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={f.withNote} onChange={(ev) => set({ withNote: ev.target.checked })} /> Kun med kommentar eller note</label></div>;
     }
   };

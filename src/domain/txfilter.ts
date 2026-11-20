@@ -22,7 +22,21 @@ export interface TxFilter {
   amountOp?: 'gt' | 'lt' | 'eq' | 'between';
   withNote: boolean;
   sort: TxSort;
+  /** Flervalg (som i et regneark). Tomme/uden = den enkelte værdi ovenfor (bruges, når andre sider linker hertil). */
+  accountIds?: string[];
+  categoryIds?: string[];
+  types?: TxType[];
+  statuses?: TxStatus[];
 }
+
+export type TxType = Exclude<TxFilter['type'], 'all'>;
+export type TxStatus = Exclude<TxFilter['status'], 'all'>;
+
+/** De valgte værdier for en kolonne – flervalget, eller den enkelte værdi. Tom = alle. */
+export const accountsOf = (f: TxFilter): string[] => (f.accountIds?.length ? f.accountIds : f.accountId ? [f.accountId] : []);
+export const categoriesOf = (f: TxFilter): string[] => (f.categoryIds?.length ? f.categoryIds : f.categoryId ? [f.categoryId] : []);
+export const typesOf = (f: TxFilter): TxType[] => (f.types?.length ? f.types : f.type !== 'all' ? [f.type] : []);
+export const statusesOf = (f: TxFilter): TxStatus[] => (f.statuses?.length ? f.statuses : f.status !== 'all' ? [f.status] : []);
 
 /** date-asc er den neutrale rækkefølge (som i banken). */
 export type TxSort = 'date-asc' | 'date-desc' | 'amount-desc' | 'amount-asc' | 'text-asc' | 'text-desc';
@@ -54,13 +68,17 @@ export function textMatches(t: Tx, q: string): boolean {
 export const hasUncategorized = (r: Resolved) => r.lines.some((l) => (l.type === 'income' || l.type === 'expense') && !l.categoryId);
 
 export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories: Category[], f: TxFilter): Tx[] {
-  const inCategory = new Set(f.categoryId ? descendants(categories, f.categoryId) : []);
+  const cats = categoriesOf(f), accs = new Set(accountsOf(f)), types = typesOf(f), statuses = statusesOf(f);
+  const inCategory = new Set(cats.flatMap((c) => descendants(categories, c)));
+  const statusOk = (r: Resolved, s: TxStatus) =>
+    s === 'pending' ? NEEDS_REVIEW.has(r.source) : s === 'done' ? !NEEDS_REVIEW.has(r.source) : hasUncategorized(r);
+  const typeOk = (r: Resolved, ty: TxType) => r.lines.some((l) => (ty === 'internal' ? l.type === 'internal' || l.type === 'outlay' : l.type === ty));
   const min = f.min?.trim() ? parseAmount(f.min) : null;
   const max = f.max?.trim() ? parseAmount(f.max) : null;
   const out = txs.filter((t) => {
     const r = resolved.get(t.id);
     if (!r) return false;
-    if (f.accountId && t.accountId !== f.accountId) return false;
+    if (accs.size && !accs.has(t.accountId)) return false;
     if (f.from && t.date < f.from) return false;
     if (f.to && t.date > f.to) return false;
     const abs = Math.abs(t.amount);
@@ -72,11 +90,9 @@ export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories
       if (max !== null && abs > Math.abs(max)) return false;
     }
     if (f.withNote && !t.note && !t.memo) return false;
-    if (f.status === 'pending' && !NEEDS_REVIEW.has(r.source)) return false;
-    if (f.status === 'done' && NEEDS_REVIEW.has(r.source)) return false;
-    if (f.status === 'uncat' && !hasUncategorized(r)) return false;
-    if (f.type !== 'all' && !r.lines.some((l) => (f.type === 'internal' ? l.type === 'internal' || l.type === 'outlay' : l.type === f.type))) return false;
-    if (f.categoryId && !r.lines.some((l) => l.categoryId && inCategory.has(l.categoryId))) return false;
+    if (statuses.length && !statuses.some((s) => statusOk(r, s))) return false;
+    if (types.length && !types.some((ty) => typeOk(r, ty))) return false;
+    if (cats.length && !r.lines.some((l) => l.categoryId && inCategory.has(l.categoryId))) return false;
     return textMatches(t, f.q);
   });
   return sortTxs(out, f.sort);
@@ -99,7 +115,7 @@ export function sortTxs(txs: Tx[], sort: TxFilter['sort']): Tx[] {
 
 /** Hvor mange filtre (ud over sortering) er slået til? */
 export const activeFilterCount = (f: TxFilter) =>
-  [f.q.trim(), f.accountId, f.categoryId, f.type !== 'all', f.status !== 'all', f.from || f.to, amountActive(f), f.withNote].filter(Boolean).length;
+  [f.q.trim(), accountsOf(f).length, categoriesOf(f).length, typesOf(f).length, statusesOf(f).length, f.from || f.to, amountActive(f), f.withNote].filter(Boolean).length;
 
 /** Er der et beløbsfilter, der faktisk filtrerer? */
 export function amountActive(f: TxFilter): boolean {

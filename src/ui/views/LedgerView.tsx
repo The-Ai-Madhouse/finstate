@@ -6,7 +6,7 @@ import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
 import { useStore } from '../../store/store';
-import { activeFilterCount, filterTxs } from '../../domain/txfilter';
+import { accountsOf, activeFilterCount, filterTxs } from '../../domain/txfilter';
 import { ChronoReview, focusTxField } from './ChronoReview';
 import { LedgerFilterBar } from './LedgerFilterBar';
 import { useFocusIntent } from '../components/NavFocus';
@@ -38,7 +38,9 @@ function LedgerInner() {
   // Kun transaktioner i det valgte financial statement.
   const periodTxs = useMemo(() => data.txs.filter((t) => t.date > data.settings.bookStart && inPeriod(t, period)), [data, period]);
   // Omfang = periode + konto. Det bestemmer fremskridt og fejring – de øvrige filtre ændrer kun, hvad man ser.
-  const scope = useMemo(() => periodTxs.filter((t) => !filter.accountId || t.accountId === filter.accountId), [periodTxs, filter.accountId]);
+  const accs = accountsOf(filter);
+  const accKey = accs.join(',');
+  const scope = useMemo(() => periodTxs.filter((t) => !accs.length || accs.includes(t.accountId)), [periodTxs, accKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const txs = useMemo(() => filterTxs(periodTxs, e.resolved, data.categories, filter), [periodTxs, e.resolved, data.categories, filter]);
 
   // Linket hertil (en transaktion, "mangler afgørelse", "uden kategori"): vis det i gennemgangen.
@@ -90,7 +92,7 @@ function LedgerInner() {
       </div>
       {!periodTxs.length && data.txs.length > 0 ? (
         <EmptyPeriod />
-      ) : tab === 'chrono' ? <ChronoReview key={`${period.id}|${filter.accountId ?? 'alle'}`} txs={txs} scope={scope} searching={nActive > (filter.accountId ? 1 : 0)} /> : tab === 'review' ? <ReviewGroups txs={review} /> : <TxTable txs={txs} />}
+      ) : tab === 'chrono' ? <ChronoReview key={`${period.id}|${accKey || 'alle'}`} txs={txs} scope={scope} searching={nActive > (accs.length ? 1 : 0)} /> : tab === 'review' ? <ReviewGroups txs={review} /> : <TxTable txs={txs} />}
     </div>
   );
 }

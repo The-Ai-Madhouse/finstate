@@ -578,6 +578,14 @@ describe('filtre i Kategorisér', () => {
     const eq = f({ amountOp: 'eq', min: '8450' });
     expect(eq.length).toBeGreaterThan(0);
     expect(eq.every((t) => Math.abs(t.amount) === 845000)).toBe(true);
+    // Flervalg: flere typer, kategorier og statusser på én gang.
+    const both = f({ types: ['income', 'internal'] });
+    expect(both.length).toBe(f({ type: 'income' }).length + f({ type: 'internal' }).length - f({ type: 'income' }).filter((t) => f({ type: 'internal' }).includes(t)).length);
+    expect(f({ types: ['expense'] }).length).toBe(f({ type: 'expense' }).length);
+    const two = f({ categoryIds: ['ex-bolig', 'ex-transport'] });
+    expect(two.length).toBeGreaterThan(f({ categoryId: 'ex-bolig' }).length);
+    expect(f({ statuses: ['pending', 'done'] }).length).toBe(d.txs.length);
+    expect(f({ accountIds: ['acc-loen', 'acc-ops'] }).length).toBe(d.txs.filter((t) => t.accountId === 'acc-loen' || t.accountId === 'acc-ops').length);
     // Tekst A–Å og Å–A.
     const az = f({ sort: 'text-asc' }).map((t) => t.text);
     expect(az).toEqual([...az].sort((a, b) => a.localeCompare(b, 'da', { sensitivity: 'base', numeric: true })));
