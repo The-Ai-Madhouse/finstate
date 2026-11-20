@@ -17,20 +17,48 @@ export const CADENCE_LABEL: Record<Cadence, string> = { monthly: 'Hver måned', 
 /** "for …" efter et beløb, fx "1.235 kr. for det halve år". */
 export const CADENCE_PER: Record<Cadence, string> = { monthly: 'om måneden', quarterly: 'for kvartalet', halfyear: 'for det halve år', yearly: 'for året' };
 
-/** Interval mellem to træk (dage) → rytme. */
-const RANGES: [Cadence, number, number][] = [
-  ['monthly', 24, 38],
-  ['quarterly', 80, 101],
-  ['halfyear', 165, 200],
-  ['yearly', 345, 385],
-];
-const cadenceOfGap = (days: number) => RANGES.find(([, lo, hi]) => days >= lo && days <= hi)?.[0];
+/** Dage mellem to træk med denne rytme. */
+const CYCLE_DAYS: Record<Cadence, number> = { monthly: 30.44, quarterly: 91.31, halfyear: 182.62, yearly: 365.25 };
+/**
+ * Passer et interval til rytmen? Svarer til 1 (et normalt træk) eller 2–3 perioder (et træk mangler i bankdata,
+ * eller en måned blev sprunget over). Weekender og helligdage flytter trækket et par dage.
+ */
+function cyclesOf(days: number, cadence: Cadence): number | undefined {
+  for (let k = 1; k <= 3; k++) {
+    const exp = CYCLE_DAYS[cadence] * k;
+    if (Math.abs(days - exp) <= Math.min(25, Math.max(7, exp * 0.12))) return k;
+  }
+  return undefined;
+}
 const MIN_OCCURRENCES: Record<Cadence, number> = { monthly: 3, quarterly: 3, halfyear: 2, yearly: 2 };
 
 /** Ord, der tyder på en regning, hvis beløb svinger (el, varme, forsikring …). */
 const BILL_WORDS = /betalingsservice|\bbs\b|\bpbs\b|abonnement|medlemskab|kontingent|forsikring|\bel\b|varme|vand|fjernvarme|licens/;
 /** Ord, der ikke hører med i navnet. */
 const NAME_NOISE = /\b(betalingsservice|bs|pbs|nets|kortkøb|køb|abonnement|medlemskab|kontingent|aps|a\/s|as|betaling|faktura)\b/g;
+/**
+ * Ord, der ikke siger noget om modtageren: betalingsformidlere, domæner, selskabsformer og byer i udenlandske kortkøb.
+ * "PAYPAL *SPOTIFY P3A1B2 STOCKHOLM" og "Spotify AB" er samme abonnement.
+ */
+const MERCHANT_NOISE = new Set([
+  'betalingsservice', 'bs', 'pbs', 'nets', 'kortkøb', 'køb', 'abonnement', 'abonnem', 'medlemskab', 'kontingent', 'betaling', 'faktura',
+  'paypal', 'pp', 'klarna', 'stripe', 'adyen', 'mobilepay', 'mobile', 'pay', 'mp', 'applepay', 'googlepay', 'dk', 'se', 'no', 'eu', 'com',
+  'www', 'http', 'https', 'net', 'org', 'io', 'tv', 'ab', 'aps', 'as', 'a', 's', 'ltd', 'inc', 'gmbh', 'bv', 'oy', 'llc', 'sarl', 'sa',
+  'limited', 'bill', 'billing', 'help', 'helppay', 'co', 'payment', 'subscription', 'recurring', 'til', 'fra', 'overf', 'reservation',
+]);
+
+/**
+ * Modtageren i en posteringstekst – de to første betydende ord. Ord med tal (referencer, kortnumre) og støjord fjernes,
+ * så små forskelle fra træk til træk ikke deler et abonnement op.
+ */
+export const merchantKey = (text: string) => merchantWords(text).slice(0, 2).join(' ');
+
+function merchantWords(text: string): string[] {
+  return text.toLowerCase().split(/[\s*/\\|,;:()[\]_.#-]+/)
+    .filter((w) => w && !/\d/.test(w))
+    .flatMap((w) => normalizeText(w).split(' '))
+    .filter((w) => w.length > 1 && !MERCHANT_NOISE.has(w));
+}
 
 export interface DetectedSub {
   /** "<konto>|<normaliseret tekst>" – samme nøgle ved hver import. */
@@ -119,9 +147,10 @@ const titleCase = (s: string) => s.replace(/(^|\s)(\S)/g, (_m, a: string, b: str
 
 /** Pænt navn ud fra posteringsteksten: "Betalingsservice Lysværket" → "Lysværket". */
 export function subName(text: string): string {
+  const words = merchantWords(text).slice(0, 3);
+  if (words.length) return titleCase(words.join(' '));
   const n = normalizeText(text);
-  const clean = n.replace(NAME_NOISE, ' ').replace(/\s+/g, ' ').trim();
-  return titleCase(clean || n || text.trim());
+  return titleCase(n.replace(NAME_NOISE, ' ').replace(/\s+/g, ' ').trim() || n || text.trim());
 }
 
 // ------------------------------------------------------------------ genkendelse
@@ -140,11 +169,12 @@ export function detectSubscriptions(data: AppData, resolved: Map<string, Resolve
   const latestOn = new Map<string, string>();
   for (const t of data.txs) if ((latestOn.get(t.accountId) ?? '') < t.date) latestOn.set(t.accountId, t.date);
 
+  // Grupér efter konto + modtager.
   const groups = new Map<string, Tx[]>();
   for (const t of candidates(data, resolved)) {
-    const n = normalizeText(t.text);
-    if (!n) continue;
-    const key = `${t.accountId}|${n}`;
+    const m = merchantKey(t.text) || normalizeText(t.text);
+    if (!m) continue;
+    const key = `${t.accountId}|${m}`;
     const g = groups.get(key);
     if (g) g.push(t);
     else groups.set(key, [t]);
@@ -153,50 +183,88 @@ export function detectSubscriptions(data: AppData, resolved: Map<string, Resolve
   const out: DetectedSub[] = [];
   for (const [key, all] of groups) {
     if (all.length < 2) continue;
-    const txs = [...all].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.seq - b.seq));
-
-    // Rytme: det almindeligste interval – mindst 75 % af intervallerne skal passe.
-    const gaps = txs.slice(1).map((t, i) => cadenceOfGap(dayDiff(txs[i].date, t.date)));
-    const counts = new Map<Cadence, number>();
-    for (const g of gaps) if (g) counts.set(g, (counts.get(g) ?? 0) + 1);
-    const best = [...counts].sort((a, b) => b[1] - a[1])[0];
-    if (!best || best[1] / gaps.length < 0.75) continue;
-    const cadence = best[0];
-    if (txs.length < MIN_OCCURRENCES[cadence]) continue;
-
-    // Beløb: fast (±15 % for mindst 75 % af trækkene) – eller en regning, der svinger inden for rimelighedens grænser.
-    const amounts = txs.map((t) => -t.amount);
-    const med = median(amounts);
-    const near = amounts.filter((a) => Math.abs(a - med) <= med * 0.15).length;
-    const fixed = near / amounts.length >= 0.75;
-    const billish = BILL_WORDS.test(normalizeText(txs[txs.length - 1].text)) || BILL_WORDS.test(txs[txs.length - 1].text.toLowerCase());
-    const spread = Math.max(...amounts) / Math.max(1, Math.min(...amounts));
-    if (!fixed && !(billish && spread <= 2.5)) continue;
-    // Kun to træk om året (eller halvåret): kræv næsten samme beløb, så tilfældige gentagelser ikke tæller.
-    if (txs.length === 2 && Math.abs(amounts[0] - amounts[1]) > Math.max(amounts[0], amounts[1]) * 0.1) continue;
-    // To MobilePay-betalinger til en person er sjældent et abonnement.
-    if (txs.length === 2 && isMobilePay(txs[0].text)) continue;
-    const variable = amounts.some((a) => Math.abs(a - med) > med * 0.03);
-    const recent = amounts.slice(-3);
-    const amount = variable && !fixed ? Math.round(recent.reduce((s, a) => s + a, 0) / recent.length) : amounts[amounts.length - 1];
-
-    // Den typiske dag i måneden (weekender flytter trækket et par dage).
-    const last = txs[txs.length - 1];
-    const day = Math.round(median(txs.slice(-6).map((t) => Number(t.date.slice(8, 10)))));
-    const [ly, lm] = [Number(last.date.slice(0, 4)), Number(last.date.slice(5, 7))];
-    const anchor = `${ly}-${pad(lm)}-${pad(Math.min(day, daysIn(ly, lm)))}`;
-
-    const cycleDays = CADENCE_MONTHS[cadence] * 30.5;
-    const active = dayDiff(last.date, latestOn.get(last.accountId) ?? last.date) <= cycleDays * 1.5 + 7;
-    const r = resolved.get(last.id);
-    const categoryId = r?.lines.find((l) => l.categoryId)?.categoryId;
-
-    out.push({
-      key, name: subName(last.text), accountId: last.accountId, amount, cadence, anchor, lastDate: last.date,
-      txIds: txs.map((t) => t.id), variable, active, ...(categoryId ? { categoryId } : {}),
-    });
+    const txs = sortTxs(all);
+    // Hele gruppen som ét abonnement (også hvis prisen er steget, eller det er en regning, der svinger) …
+    const whole = evaluate(txs);
+    if (whole) { out.push(build(key, txs, whole, latestOn, resolved)); continue; }
+    // … ellers flere abonnementer hos samme modtager med hver sit beløb (fx to forsikringer eller to Apple-abonnementer).
+    for (const c of amountClusters(txs)) {
+      if (c.length < 2) continue;
+      const r = evaluate(c);
+      if (r) out.push(build(`${key}|${Math.round(median(c.map((t) => -t.amount)) / 100)}`, c, r, latestOn, resolved));
+    }
   }
   return out.sort((a, b) => b.amount / CADENCE_MONTHS[b.cadence] - a.amount / CADENCE_MONTHS[a.cadence]);
+}
+
+const sortTxs = (txs: Tx[]) => [...txs].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.seq - b.seq));
+
+/** Beløbsgrupper: træk inden for 15 % af hinanden. */
+function amountClusters(txs: Tx[]): Tx[][] {
+  const byAmount = [...txs].sort((a, b) => a.amount - b.amount);
+  const out: Tx[][] = [];
+  for (const t of byAmount) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(t.amount - last[0].amount) <= Math.abs(last[0].amount) * 0.15) last.push(t);
+    else out.push([t]);
+  }
+  return out.map(sortTxs);
+}
+
+interface Verdict { cadence: Cadence; variable: boolean; amount: number }
+
+/** Er trækkene (sorteret efter dato) et abonnement? */
+function evaluate(all: Tx[]): Verdict | undefined {
+  // To træk inden for en uge (fx et nyt forsøg efter en afvist betaling) tæller som ét.
+  const txs = all.filter((t, i) => i === 0 || dayDiff(all[i - 1].date, t.date) >= 7);
+  if (txs.length < 2) return undefined;
+  const gaps = txs.slice(1).map((t, i) => dayDiff(txs[i].date, t.date));
+
+  // Rytme: den, flest intervaller passer præcist til. Mindst 75 % af intervallerne skal passe (evt. med et manglende træk),
+  // og mindst halvdelen skal være præcis én periode.
+  let best: { cadence: Cadence; exact: number; fit: number } | undefined;
+  for (const c of CADENCES) {
+    const ks = gaps.map((g) => cyclesOf(g, c));
+    const exact = ks.filter((k) => k === 1).length;
+    const fit = ks.filter((k) => k !== undefined).length;
+    if (!best || exact > best.exact) best = { cadence: c, exact, fit };
+  }
+  if (!best || !best.exact || best.fit / gaps.length < 0.75 || best.exact / gaps.length < 0.5) return undefined;
+  const cadence = best.cadence;
+  if (txs.length < MIN_OCCURRENCES[cadence]) return undefined;
+
+  // Beløb: fast (hvert træk inden for 15 % af det forrige – en prisstigning er fin) – eller en regning, der svinger inden for rimelighedens grænser.
+  const amounts = txs.map((t) => -t.amount);
+  const med = median(amounts);
+  const steady = amounts.slice(1).filter((a, i) => Math.abs(a - amounts[i]) <= Math.max(a, amounts[i]) * 0.15).length;
+  const near = amounts.filter((a) => Math.abs(a - med) <= med * 0.15).length;
+  const fixed = near / amounts.length >= 0.75 || (amounts.length >= 3 && steady / (amounts.length - 1) >= 0.75);
+  const lastText = txs[txs.length - 1].text;
+  const billish = BILL_WORDS.test(normalizeText(lastText)) || BILL_WORDS.test(lastText.toLowerCase());
+  const spread = Math.max(...amounts) / Math.max(1, Math.min(...amounts));
+  if (!fixed && !(billish && spread <= 2.5)) return undefined;
+  // Kun to træk: kræv næsten samme beløb, så tilfældige gentagelser ikke tæller.
+  if (txs.length === 2 && Math.abs(amounts[0] - amounts[1]) > Math.max(amounts[0], amounts[1]) * 0.1) return undefined;
+  // To MobilePay-betalinger til en person er sjældent et abonnement.
+  if (txs.length === 2 && isMobilePay(txs[0].text)) return undefined;
+  const recent = amounts.slice(-3);
+  const variable = !fixed || recent.some((a) => Math.abs(a - median(recent)) > median(recent) * 0.03);
+  const amount = !fixed ? Math.round(recent.reduce((s, a) => s + a, 0) / recent.length) : amounts[amounts.length - 1];
+  return { cadence, variable, amount };
+}
+
+function build(key: string, txs: Tx[], v: Verdict, latestOn: Map<string, string>, resolved: Map<string, Resolved>): DetectedSub {
+  // Den typiske dag i måneden (weekender flytter trækket et par dage).
+  const last = txs[txs.length - 1];
+  const day = Math.round(median(txs.slice(-6).map((t) => Number(t.date.slice(8, 10)))));
+  const [ly, lm] = [Number(last.date.slice(0, 4)), Number(last.date.slice(5, 7))];
+  const anchor = `${ly}-${pad(lm)}-${pad(Math.min(day, daysIn(ly, lm)))}`;
+  const active = dayDiff(last.date, latestOn.get(last.accountId) ?? last.date) <= CYCLE_DAYS[v.cadence] * 1.5 + 7;
+  const categoryId = resolved.get(last.id)?.lines.find((l) => l.categoryId)?.categoryId;
+  return {
+    key, name: subName(last.text), accountId: last.accountId, amount: v.amount, cadence: v.cadence, anchor, lastDate: last.date,
+    txIds: txs.map((t) => t.id), variable: v.variable, active, ...(categoryId ? { categoryId } : {}),
+  };
 }
 
 /** Transaktioner, der matcher et manuelt abonnement (tekst + konto). */

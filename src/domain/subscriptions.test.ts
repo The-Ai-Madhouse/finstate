@@ -82,6 +82,29 @@ describe('genkendelse af abonnementer', () => {
     expect(names.some((n) => /overførsel|opsparing|billån/i.test(n))).toBe(false);
   });
 
+  it('finds subscriptions whose text changes from charge to charge', () => {
+    const refs = ['P3A1B2C9', 'P7Q2Z4K1', 'P1X8M3V5', 'P9D6F2H4', 'P2L5N7R8'];
+    const d = data([
+      ...refs.map((r, i) => tx(`p${i}`, addMonthsKeepDay('2026-01-14', i), `PAYPAL *SPOTIFY ${r} STOCKHOLM`, -109_00)),
+      ...[...Array(5)].map((_, i) => tx(`n${i}`, addMonthsKeepDay('2026-01-03', i), i % 2 ? `NETFLIX.COM 866-579-${7170 + i}` : `Visa/Dankort Netflix.com ${i + 10}.0${i + 1}`, -129_00)),
+    ]);
+    const found = detectSubscriptions(d, resolveAll(d));
+    expect(found.map((f) => [f.cadence, f.amount, f.txIds.length]).sort()).toEqual([['monthly', 109_00, 5], ['monthly', 129_00, 5]]);
+  });
+
+  it('tolerates a missing month and a big price increase', () => {
+    const dates = ['2026-01-05', '2026-02-05', '2026-04-06', '2026-05-05', '2026-06-05', '2026-07-06'];
+    const d = data(dates.map((dt, i) => tx(`m${i}`, dt, 'Musikkassen', -(i < 3 ? 99_00 : 129_00))));
+    const [f] = detectSubscriptions(d, resolveAll(d));
+    expect([f.cadence, f.amount, f.txIds.length]).toEqual(['monthly', 129_00, 6]);
+  });
+
+  it('splits two subscriptions with the same merchant by amount', () => {
+    const d = data([...monthly('a', 'Apple.com/bill', -12_00, 2), ...monthly('b', 'APPLE.COM/BILL', -109_00, 18)]);
+    const found = detectSubscriptions(d, resolveAll(d));
+    expect(found.map((f) => f.amount).sort((a, b) => a - b)).toEqual([12_00, 109_00]);
+  });
+
   it('cleans up names', () => {
     expect(subName('Betalingsservice Fiberby')).toBe('Fiberby');
     expect(subName('Fitness Puls medlemskab 0423')).toBe('Fitness Puls');

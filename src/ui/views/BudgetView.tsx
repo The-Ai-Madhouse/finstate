@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { dateDa } from '../../domain/format';
 import {
-  CADENCES, CADENCE_LABEL, CADENCE_MONTHS, CADENCE_PER, addMonthsKeepDay, budgetItems, detectSubscriptions, nextOccurrence,
+  CADENCES, CADENCE_LABEL, CADENCE_MONTHS, addMonthsKeepDay, budgetItems, detectSubscriptions, nextOccurrence,
   occurrences, paidTx, perMonth, removeSubscription, resetSubscription, restoreSubscription, saveSubscription, subName,
   type BudgetItem, type Occurrence,
 } from '../../domain/subscriptions';
@@ -9,7 +9,7 @@ import type { Cadence, Subscription, Tx } from '../../domain/types';
 import { hash, uid } from '../../domain/util';
 import { useEngine } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { AccountSelect, AmountInput } from '../components/common';
+import { AccountSelect, AmountInput, Tile } from '../components/common';
 
 /**
  * Dagligt budget: faste udgifter og abonnementer i en kalender, så man kan se regningerne, før de bliver trukket.
@@ -50,7 +50,7 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
   return <span className={`bud-avatar ${size}`} style={{ ['--h' as string]: hueOf(name) }} aria-hidden>{initials(name)}</span>;
 }
 
-const SOURCE_LABEL: Record<BudgetItem['source'], string> = { detected: 'Fundet automatisk', edited: 'Rettet af dig', manual: 'Tilføjet af dig' };
+const SOURCE_LABEL: Record<BudgetItem['source'], string> = { detected: 'Fundet automatisk', edited: 'Rettet', manual: 'Tilføjet' };
 
 export function BudgetView() {
   const e = useEngine();
@@ -101,77 +101,89 @@ export function BudgetView() {
   const save = (s: Subscription) => { update((d) => saveSubscription(d, s)); setEditing(undefined); };
   const remove = (i: BudgetItem) => { update((d) => removeSubscription(d, i)); setEditing(undefined); };
 
+  // Nøgletallene gælder altid den indeværende måned – kalenderen kan bladres for sig.
+  const nowOcc = occurrences(items, today, monthEnd(today));
+  const nowSum = nowOcc.reduce((s, o) => s + o.item.amount, 0);
+
   return (
-    <div className="budget">
-      <div className="bud-intro">
-        <div>
-          <h1>Se regningerne, før de bliver trukket</h1>
-          <p className="ink2">
-            Dine faste udgifter og abonnementer i en kalender. Finstate finder dem selv i dine importerede bankdata – har den
-            taget fejl eller mangler der en, så ret eller tilføj den. Det her er dit daglige budget og påvirker ikke dit financial statement.
-          </p>
-        </div>
-        <button className="btn bud-primary" onClick={() => setEditing('new')}>＋ Tilføj abonnement</button>
+    <div className="stack budget">
+      <div className="row bud-head">
+        <h1 className="grow">Abonnementer</h1>
+        <button className="btn primary" onClick={() => setEditing('new')}>＋ Tilføj abonnement</button>
       </div>
 
       {!items.length ? (
-        <div className="bud-empty card">
+        <div className="card bud-empty">
           <h2>Ingen abonnementer endnu</h2>
           <p className="ink2">
             {data.txs.length
               ? 'Finstate fandt ingen faste træk i dine transaktioner. Tilføj dem selv – eller importér flere måneders bankdata, så de kan genkendes.'
               : 'Importér bankdata (under et financial statement → Importér), så finder Finstate dine abonnementer – eller tilføj dem selv.'}
           </p>
-          <button className="btn bud-primary" onClick={() => setEditing('new')}>＋ Tilføj abonnement</button>
         </div>
-      ) : (
+      ) : (<>
+        <div className="tiles bud-tiles">
+          <Tile label={`Tilbage at betale i ${monthName(today)}`} value={kr(nowSum)} delta={`${nowOcc.length} træk resten af måneden`} />
+          <Tile label="Faste udgifter om måneden" value={kr(perMonthTotal)} delta={`${active.length} abonnementer og regninger`} />
+          <Tile label="Næste store regning" value={nextBig ? kr(nextBig.item.amount) : '–'}
+            delta={nextBig ? `${nextBig.item.name} · ${dayMonth(nextBig.date, today)}` : 'Ingen på vej'} />
+          <Tile label="Læg til side til store regninger" value={`${kr(bigPerMonth)}/md.`} delta={big.length ? `${big.length} betales kvartalsvis, halvårligt eller årligt` : 'Ingen store regninger'} />
+        </div>
+
         <div className="bud-grid">
-          <section className="bud-hero" aria-label="Kalender">
-            <div className="bud-big num">{kr(remainingSum)}</div>
-            <div className="bud-sub">
-              {isCurrent ? `tilbage at betale i ${monthName(month)}` : `i faste udgifter i ${monthName(month)} ${month.slice(0, 4)}`}
-              {' · '}{kr(perMonthTotal)} i faste udgifter om måneden
+          <section className="card bud-list">
+            <div className="card-head">
+              <h2>Abonnementer og faste udgifter <span className="bud-count">{active.length}</span></h2>
             </div>
-            <div className="bud-monthnav">
-              <button className="bud-nav" aria-label="Forrige måned" onClick={() => setMonth(addMonthsKeepDay(month, -1))}>‹</button>
-              <button className="bud-month" onClick={() => { setMonth(monthStart(today)); setDay(today); }} title="Gå til i dag">
-                {capital(monthName(month))}{month.slice(0, 4) !== today.slice(0, 4) ? ` ${month.slice(0, 4)}` : ''}
-              </button>
-              <button className="bud-nav" aria-label="Næste måned" onClick={() => setMonth(addMonthsKeepDay(month, 1))}>›</button>
-            </div>
-            <Calendar month={month} occ={monthOcc} today={today} dataEnd={dataEnd} txById={e.txById} selected={day} onSelect={setDay} />
-            {day && day >= month && day <= mEnd && (
-              <div className="bud-day">
-                <div className="bud-day-head">{capital(dateDa(day))}</div>
-                {sel.length ? sel.map((o) => (
-                  <OccRow key={o.item.id} o={o} today={today} dataEnd={dataEnd} txById={e.txById} onOpen={() => setEditing(o.item)} />
-                )) : <div className="bud-muted">Ingen træk denne dag.</div>}
+            {dataEnd && <p className="muted small bud-note">Fundet i dine bankdata til og med {dateDa(dataEnd)}. Klik for at rette – eller skjule et forkert gæt.</p>}
+            <SubList items={active} today={today} accountName={accountName} onOpen={setEditing} />
+            {stopped.length > 0 && (<>
+              <h3 className="bud-h3">Måske stoppet <span className="muted small">– ikke trukket i et stykke tid</span></h3>
+              <SubList items={stopped} today={today} accountName={accountName} onOpen={setEditing} stopped />
+            </>)}
+            {hidden.length > 0 && (
+              <div className="bud-hidden">
+                <button className="btn ghost sm" onClick={() => setShowHidden((x) => !x)}>{showHidden ? '▾' : '▸'} Skjulte ({hidden.length})</button>
+                {showHidden && (
+                  <ul className="bud-rows">
+                    {hidden.map((h) => (
+                      <li key={h.key} className="bud-row muted-row">
+                        <Avatar name={h.name} size="sm" />
+                        <span className="grow">{h.name} <span className="bud-muted">· {CADENCE_LABEL[h.cadence].toLowerCase()} · {kr(h.amount)}</span></span>
+                        <button className="btn sm" onClick={() => update((d) => restoreSubscription(d, h.key))}>Vis igen</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
           </section>
 
           <section className="bud-side">
-            <div className="bud-card">
-              <h2>Næste store regning</h2>
-              {nextBig ? (
-                <button className="bud-bill" onClick={() => setEditing(nextBig.item)}>
-                  <Avatar name={nextBig.item.name} />
-                  <span className="grow">
-                    <b>{nextBig.item.name}</b>
-                    <span className="bud-muted">trækkes {dayMonth(nextBig.date, today)}</span>
-                  </span>
-                  <span className="bud-right">
-                    <b className="num">{nextBig.item.variable ? 'ca. ' : ''}{kr(nextBig.item.amount)}</b>
-                    <span className="bud-muted">{CADENCE_PER[nextBig.item.cadence]}</span>
-                  </span>
+            <div className="bud-hero" aria-label="Kalender">
+              <div className="bud-monthnav">
+                <button className="bud-nav" aria-label="Forrige måned" onClick={() => setMonth(addMonthsKeepDay(month, -1))}>‹</button>
+                <button className="bud-month" onClick={() => { setMonth(monthStart(today)); setDay(today); }} title="Gå til i dag">
+                  {capital(monthName(month))}{month.slice(0, 4) !== today.slice(0, 4) ? ` ${month.slice(0, 4)}` : ''}
+                  <span className="bud-month-sum num">{isCurrent ? `${kr(remainingSum)} tilbage` : kr(remainingSum)}</span>
                 </button>
-              ) : <div className="bud-muted">Ingen store regninger på vej.</div>}
+                <button className="bud-nav" aria-label="Næste måned" onClick={() => setMonth(addMonthsKeepDay(month, 1))}>›</button>
+              </div>
+              <Calendar month={month} occ={monthOcc} today={today} dataEnd={dataEnd} txById={e.txById} selected={day} onSelect={setDay} />
+              {day && day >= month && day <= mEnd && (
+                <div className="bud-day">
+                  <div className="bud-day-head">{capital(dateDa(day))}</div>
+                  {sel.length ? sel.map((o) => (
+                    <OccRow key={o.item.id} o={o} today={today} dataEnd={dataEnd} txById={e.txById} onOpen={() => setEditing(o.item)} />
+                  )) : <div className="bud-muted">Ingen træk denne dag.</div>}
+                </div>
+              )}
             </div>
 
-            <div className="bud-card">
-              <h2>{big.length ? <>De store regninger svarer til {kr(bigPerMonth)} om måneden</> : 'De næste 12 måneder'}</h2>
+            <div className="card bud-bars-card">
+              <div className="card-head"><h2>De næste 12 måneder</h2></div>
               <div className="bud-bars" role="img" aria-label={`Faste udgifter pr. måned de næste 12 måneder, gennemsnit ${kr(avg)}`}>
-                <div className="bud-avg" style={{ bottom: `calc(20px + (100% - 42px) * ${avg / maxBar})` }}><span>gns. {kr(avg).replace(' kr.', ' kr./md.')}</span></div>
+                <div className="bud-avg" style={{ bottom: `calc(18px + (100% - 36px) * ${avg / maxBar})` }}><span>gns. {kr(avg).replace(' kr.', ' kr./md.')}</span></div>
                 {bars.map((b, i) => (
                   <button key={b.s} className={`bud-bar ${b.s === month ? 'on' : ''}`} title={`${capital(monthName(b.s))} ${b.s.slice(0, 4)}: ${kr(b.total)}${b.extra ? ` (heraf ${kr(b.extra)} store regninger)` : ''}`}
                     onClick={() => { setMonth(b.s); setDay(undefined); }}>
@@ -179,7 +191,7 @@ export function BudgetView() {
                       {b.extra > 0 && <span className="extra" style={{ flexGrow: b.extra }} />}
                       <span className="fixed" style={{ flexGrow: b.fixed || 0.0001 }} />
                     </span>
-                    <span className={`lbl ${i === 0 ? 'now' : ''}`}>{MONTHS_SHORT[Number(b.s.slice(5, 7)) - 1]}</span>
+                    <span className={`lbl ${i === 0 ? 'now' : ''}`}>{MONTHS_SHORT[Number(b.s.slice(5, 7)) - 1].slice(0, 1)}</span>
                   </button>
                 ))}
               </div>
@@ -187,40 +199,7 @@ export function BudgetView() {
             </div>
           </section>
         </div>
-      )}
-
-      {items.length > 0 && (
-        <section className="bud-card bud-list">
-          <div className="bud-list-head">
-            <h2>Abonnementer og faste udgifter <span className="bud-count">{active.length}</span></h2>
-            <span className="grow" />
-            <button className="btn sm" onClick={() => setEditing('new')}>＋ Tilføj</button>
-          </div>
-          {dataEnd && <p className="bud-muted small">Fundet i dine bankdata til og med {dateDa(dataEnd)}. Klik på et abonnement for at rette det.</p>}
-          <SubList items={active} today={today} accountName={accountName} onOpen={setEditing} />
-          {stopped.length > 0 && (<>
-            <h3 className="bud-h3">Måske stoppet</h3>
-            <p className="bud-muted small">Er ikke trukket i et stykke tid. Ret dem, hvis de stadig kører – ellers skjul dem.</p>
-            <SubList items={stopped} today={today} accountName={accountName} onOpen={setEditing} stopped />
-          </>)}
-          {hidden.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <button className="btn ghost sm" onClick={() => setShowHidden((x) => !x)}>{showHidden ? '▾' : '▸'} Skjulte ({hidden.length})</button>
-              {showHidden && (
-                <ul className="bud-rows">
-                  {hidden.map((h) => (
-                    <li key={h.key} className="bud-row muted-row">
-                      <Avatar name={h.name} size="sm" />
-                      <span className="grow">{h.name} <span className="bud-muted">· {CADENCE_LABEL[h.cadence].toLowerCase()} · {kr(h.amount)}</span></span>
-                      <button className="btn sm" onClick={() => update((d) => restoreSubscription(d, h.key))}>Vis igen</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </section>
-      )}
+      </>)}
 
       {editing && (
         <SubDialog item={editing === 'new' ? undefined : editing} today={today} onClose={() => setEditing(undefined)} onSave={save}
@@ -300,8 +279,8 @@ function SubList({ items, today, accountName, onOpen, stopped }: { items: Budget
                   {stopped && i.lastDate ? ` · sidst trukket ${dayMonth(i.lastDate, today)}` : ''}
                 </span>
               </span>
-              <span className={`bud-src ${i.source}`}>{SOURCE_LABEL[i.source]}</span>
-              {!stopped && <span className="bud-next"><span className="bud-muted">næste</span>{dayMonth(next, today)}</span>}
+              {i.source !== 'detected' && <span className={`bud-src ${i.source}`}>{SOURCE_LABEL[i.source]}</span>}
+              {!stopped && <span className="bud-next">{dayMonth(next, today)}</span>}
               <span className="bud-right">
                 <b className="num">{i.variable ? 'ca. ' : ''}{kr(i.amount)}</b>
                 {i.cadence !== 'monthly' && <span className="bud-muted">{kr(perMonth(i))}/md.</span>}
@@ -369,7 +348,7 @@ function SubDialog({ item, today, onClose, onSave, onRemove, onReset }: {
           {onReset && <button type="button" className="btn ghost" onClick={onReset}>Brug Finstates forslag</button>}
           <span style={{ flex: 1 }} />
           <button type="button" className="btn" onClick={onClose}>Annullér</button>
-          <button type="submit" className="btn bud-primary" disabled={!ok}>{item?.source === 'detected' ? 'Gem rettelse' : 'Gem'}</button>
+          <button type="submit" className="btn primary" disabled={!ok}>{item?.source === 'detected' ? 'Gem rettelse' : 'Gem'}</button>
         </div>
       </form>
     </div>
