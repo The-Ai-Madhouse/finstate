@@ -555,6 +555,7 @@ table.bs tr.equity td { border-top: 2px solid var(--ink); }
 .combo-opt.hi .combo-hint { color: inherit; opacity: 0.8; }
 .combo-input { width: 100%; }
 .combo-input:not(:focus) { cursor: pointer; }
+.combo-list.floating { z-index: 200; }
 .combo-list { position: absolute; top: calc(100% + 6px); left: 0; z-index: 25; width: max(100%, 300px); max-height: 320px; overflow-y: auto; background: var(--surface); border: 1px solid var(--ring); border-radius: 16px; box-shadow: var(--shadow-lg); padding: 6px; animation: pop-in 0.18s var(--ease); }
 .combo-group { font-size: 11px; font-weight: 700; color: var(--muted); padding: 8px 10px 3px; }
 .combo-opt { padding: 6px 10px; border-radius: 10px; cursor: pointer; font-size: 13.5px; display: flex; justify-content: space-between; gap: 8px; }

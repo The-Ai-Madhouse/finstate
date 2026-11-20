@@ -225,7 +225,7 @@ export function SettleOverview() {
               const left = st.pending.reduce((s, i) => s + i.amount, 0) + st.bad.reduce((s, g) => s + g.sum, 0);
               const isOpen = openId === a.id;
               return [
-                <tr key={a.id} className={`click ${isOpen ? 'expanded' : ''}`} data-focus={`settle:post:${a.id}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,input,.combo')) setOpenId(isOpen ? undefined : a.id); }}>
+                <tr key={a.id} className={`click ${isOpen ? 'expanded' : ''}`} data-focus={`settle:post:${a.id}`} onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,input,.combo,.combo-list')) setOpenId(isOpen ? undefined : a.id); }}>
                   <td><span className={`caret ${isOpen ? 'open' : ''}`} aria-hidden>›</span> {a.name}</td>
                   <td className="num"><Money v={bal} decimals /></td>
                   <td><PostStatus st={st} left={left} /></td>

@@ -1,5 +1,6 @@
 import { categoryPath, flattenTree } from '../../domain/categories';
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { NEEDS_REVIEW, SOURCE_LABEL, type Source } from '../../domain/classify';
 import type { Check, Engine } from '../../domain/engine';
 import { kr, kr2f, parseAmount } from '../../domain/format';
@@ -174,6 +175,31 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
     listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [hi, open]);
 
+  // Listen lægges oven på alt andet (i <body>) og placeres ud fra feltet, så en dialog eller et vindue, der selv kan
+  // scrolle, ikke klipper den. Er der ikke plads nedenunder, åbner den opad.
+  const [pos, setPos] = useState<CSSProperties>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = inputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight, vw = window.innerWidth;
+      const below = vh - r.bottom - 12, above = r.top - 12;
+      const up = below < 220 && above > below;
+      const width = Math.min(Math.max(r.width, 300), vw - 16);
+      const left = Math.max(8, Math.min(r.left, vw - width - 8));
+      setPos({
+        position: 'fixed', left, width, maxHeight: Math.max(120, Math.min(360, up ? above : below)),
+        ...(up ? { bottom: vh - r.top + 6, top: 'auto' } : { top: r.bottom + 6 }),
+      });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open, inputRef]);
+
   const choose = (o: Opt, commit: boolean) => {
     setOpen(false);
     setQ('');
@@ -215,8 +241,8 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
           else if (onTypeKey && !e.altKey && /^[12]$/.test(e.key) && !/\d/.test(q)) { e.preventDefault(); e.stopPropagation(); onTypeKey(e.key, q); }
         }}
       />
-      {open && (
-        <div className="combo-list" role="listbox" ref={listRef}>
+      {open && pos && createPortal(
+        <div className="combo-list floating" role="listbox" ref={listRef} style={pos}>
           {opts.map((o, i) => (
             <Fragment key={o.id}>
               {o.group && (i === 0 || opts[i - 1].group !== o.group) && <div className="combo-group">{o.group}</div>}
@@ -234,7 +260,8 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
             </Fragment>
           ))}
           {!filtered.length && words.length > 0 && <div className="combo-empty">{emptyText} "{q}"</div>}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
