@@ -13,18 +13,21 @@ const clsOf = (l: Split): Classification => clsOfLine(l);
  * Opdel én transaktion i flere dele – fx en udbetaling, der både er indtægt og en
  * intern overførsel til en anden post. Første linje er altid "resten" og regnes automatisk.
  */
-export function SplitDialog({ tx, resolved, onClose, onSaved }: { tx: Tx; resolved: Resolved; onClose: () => void; onSaved?: () => void }) {
+export interface SplitPreset { rest: Classification; parts: Part[]; note?: string }
+
+export function SplitDialog({ tx, resolved, onClose, onSaved, preset }: { tx: Tx; resolved: Resolved; onClose: () => void; onSaved?: () => void; preset?: SplitPreset }) {
   const sign = tx.amount < 0 ? -1 : 1;
   const total = Math.abs(tx.amount);
   const initial = resolved.lines;
-  const [rest, setRest] = useState<Classification>(() => clsOf(initial[0]));
-  const [parts, setParts] = useState<Part[]>(() =>
-    initial.length > 1 ? initial.slice(1).map((l) => ({ cls: clsOf(l), amt: Math.abs(l.amount) })) : [{ cls: { type: sign > 0 ? 'income' : 'expense' }, amt: 0 }],
+  // Et forslag (fx "Opdel kurtage") udfylder delene på forhånd – alt kan rettes.
+  const [rest, setRest] = useState<Classification>(() => preset?.rest ?? clsOf(initial[0]));
+  const [parts, setParts] = useState<Part[]>(() => preset?.parts ??
+    (initial.length > 1 ? initial.slice(1).map((l) => ({ cls: clsOf(l), amt: Math.abs(l.amount) })) : [{ cls: { type: sign > 0 ? 'income' : 'expense' }, amt: 0 }]),
   );
   const [remember, setRemember] = useState(false);
   const rulesOn = useStore((s) => s.data.settings.rulesEnabled === true);
   const categories = useStore((s) => s.data.categories);
-  const [focusIdx, setFocusIdx] = useState(initial.length > 1 ? -1 : 0);
+  const [focusIdx, setFocusIdx] = useState(initial.length > 1 || preset ? -1 : 0);
   const listRef = useRef<HTMLDivElement>(null);
   const restAmt = total - parts.reduce((s, p) => s + p.amt, 0);
   // Resten med fortegn: er delene større end beløbet, går resten den anden vej (fx en udgift, hvor resten bliver en indtægt).
@@ -70,6 +73,7 @@ export function SplitDialog({ tx, resolved, onClose, onSaved }: { tx: Tx; resolv
         <p className="small ink2" style={{ marginBottom: 12 }}>
           {kr(total)} {sign < 0 ? 'ud' : 'ind'} fordelt på flere dele. Skriv beløbet for hver del – <b>resten</b> regnes automatisk.
         </p>
+        {preset?.note && <div className="banner info small" style={{ marginBottom: 12 }}>{preset.note}</div>}
 
         <div className="split-list" ref={listRef}>
           <div className="split-line rest">

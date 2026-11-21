@@ -159,6 +159,9 @@ const FIELDS: { k: keyof ColumnMapping; label: string; required?: boolean; help:
   { k: 'category', label: 'Bankens hovedkategori', help: 'Kun til forslag' },
   { k: 'subcategory', label: 'Bankens underkategori', help: 'Kun til forslag' },
   { k: 'accountName', label: 'Kontonavn', help: 'Vælger kontoen automatisk' },
+  { k: 'fee', label: 'Kurtage/gebyr', help: 'Værdipapirhandel: kurtagen skilles fra købsprisen' },
+  { k: 'quantity', label: 'Antal', help: 'Værdipapirhandel: antal stk.' },
+  { k: 'price', label: 'Kurs', help: 'Værdipapirhandel: kurs pr. stk.' },
 ];
 
 function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: (p: Pending) => void; onDone: (msg: string) => void; onCancel: () => void }) {
@@ -189,6 +192,9 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
   const fresh = preview?.txs.filter((t) => !existingById.has(t.id)) ?? [];
   // Allerede importerede transaktioner, som filen kan give en kommentar.
   const noteFills = preview?.txs.filter((t) => t.note && existingById.has(t.id) && !existingById.get(t.id)!.note) ?? [];
+  // Allerede importerede handler, hvor filen kan fortælle, hvad kurtagen var.
+  const tradeFills = preview?.txs.filter((t) => t.trade && existingById.has(t.id) && !existingById.get(t.id)!.trade) ?? [];
+  const trades = preview?.txs.filter((t) => t.trade).length ?? 0;
   const chain = preview ? orderChain(preview.txs) : undefined;
   const hint = accountHint(p.sheet, p.mapping);
   const useBank = data.settings.useBankCategories !== false;
@@ -211,11 +217,14 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
   const doImport = () => {
     if (!preview || !p.accountId) return;
     const notes = new Map(noteFills.map((t) => [t.id, t.note!]));
+    const tradeById = new Map(tradeFills.map((t) => [t.id, t.trade!]));
     const accountId = p.accountId;
     update((d) => {
       let next: typeof d = {
         ...d,
-        txs: [...d.txs.map((t) => (notes.has(t.id) ? { ...t, note: notes.get(t.id) } : t)), ...fresh],
+        txs: [...d.txs.map((t) => (notes.has(t.id) || tradeById.has(t.id)
+          ? { ...t, ...(notes.has(t.id) ? { note: notes.get(t.id) } : {}), ...(tradeById.has(t.id) ? { trade: tradeById.get(t.id) } : {}) }
+          : t)), ...fresh],
         imports: [...(d.imports ?? []), { id: uid('imp'), fileName: p.fileName, accountId, importedAt: new Date().toISOString(), txIds: preview.txs.map((t) => t.id), from, to }],
         importProfiles: { ...d.importProfiles, [p.sheet.headerSignature]: p.mapping as ColumnMapping },
       };
@@ -230,6 +239,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
         (dup ? ` (${dup} fandtes allerede)` : '') +
         (outside ? `, ${outside} uden for perioden sprunget over` : '') +
         (noteFills.length ? `, ${noteFills.length} fik din kommentar tilføjet` : '') +
+        (trades ? `, ${trades} handler med kurtage fundet – kurtagen kan opdeles i Kategorisér` : '') +
         '. Næste trin: Kategorisér.',
     );
   };
@@ -248,6 +258,8 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
     ['Beløb', colName(p.mapping.amount)],
     ['Saldo', colName(p.mapping.balance)],
     ['Kommentar', colName(p.mapping.note)],
+    ['Kurtage', colName(p.mapping.fee)],
+    ['Antal × kurs', p.mapping.quantity !== undefined && p.mapping.price !== undefined ? `${colName(p.mapping.quantity)} × ${colName(p.mapping.price)}` : undefined],
   ].filter(([, v]) => v);
 
   return (
@@ -354,6 +366,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
           <span className="chip user">{fresh.length} nye</span>
           {preview.txs.length - fresh.length > 0 && <span className="chip">{preview.txs.length - fresh.length} findes allerede</span>}
           {noteFills.length > 0 && <span className="chip user">{noteFills.length} får din kommentar</span>}
+          {trades > 0 && <span className="chip user" title="Købs-/salgspris og kurtage er fundet – i Kategorisér kan du opdele kurtagen for sig">{trades} handler med kurtage</span>}
           {outside > 0 && <span className="chip" title="Uden for den valgte periode – importeres ikke">{outside} uden for perioden</span>}
           {p.mapping.balance === undefined ? (
             <span className="chip review">Ingen saldo – kan ikke afstemmes automatisk</span>
@@ -364,8 +377,8 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
           )}
           {preview.errors.length > 0 && <span className="chip review" title={preview.errors.slice(0, 5).map((e) => `Række ${e.row}: ${e.reason}`).join('\n')}>{preview.errors.length} rækker sprunget over</span>}
           <span className="spacer" />
-          <button className="btn primary" disabled={rangeBad || (!fresh.length && !noteFills.length)} onClick={doImport}>
-            {fresh.length ? `Importér ${fresh.length} transaktioner` : `Tilføj ${noteFills.length} kommentarer`}
+          <button className="btn primary" disabled={rangeBad || (!fresh.length && !noteFills.length && !tradeFills.length)} onClick={doImport}>
+            {fresh.length ? `Importér ${fresh.length} transaktioner` : noteFills.length ? `Tilføj ${noteFills.length} kommentarer` : `Tilføj kurtage til ${tradeFills.length} handler`}
           </button>
         </div>
       )}

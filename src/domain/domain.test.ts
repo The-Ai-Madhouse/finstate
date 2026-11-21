@@ -578,6 +578,14 @@ describe('filtre i Kategorisér', () => {
     const eq = f({ amountOp: 'eq', min: '8450' });
     expect(eq.length).toBeGreaterThan(0);
     expect(eq.every((t) => Math.abs(t.amount) === 845000)).toBe(true);
+    // Retning: kun penge ind eller ud – og sortering med fortegn.
+    expect(f({ amountSign: 'out' }).every((t) => t.amount < 0)).toBe(true);
+    expect(f({ amountSign: 'in' }).every((t) => t.amount > 0)).toBe(true);
+    expect(f({ amountSign: 'out' }).length + f({ amountSign: 'in' }).length).toBe(d.txs.filter((t) => t.amount !== 0).length);
+    expect(f({ amountSign: 'out', amountOp: 'gt', min: '5000' }).every((t) => t.amount < -500000)).toBe(true);
+    const signed = f({ sort: 'signed-asc' }).map((t) => t.amount);
+    expect(signed).toEqual([...signed].sort((a, b) => a - b));
+    expect(f({ sort: 'signed-desc' })[0].amount).toBe(Math.max(...d.txs.map((t) => t.amount)));
     // Flervalg: flere typer, kategorier og statusser på én gang.
     const both = f({ types: ['income', 'internal'] });
     expect(both.length).toBe(f({ type: 'income' }).length + f({ type: 'internal' }).length - f({ type: 'income' }).filter((t) => f({ type: 'internal' }).includes(t)).length);

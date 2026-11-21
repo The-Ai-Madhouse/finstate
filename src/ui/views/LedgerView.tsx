@@ -9,6 +9,7 @@ import { useStore } from '../../store/store';
 import { accountsOf, activeFilterCount, filterTxs } from '../../domain/txfilter';
 import { ChronoReview, focusTxField } from './ChronoReview';
 import { LedgerFilterBar } from './LedgerFilterBar';
+import { TradeLine } from '../components/TradeLine';
 import { useFocusIntent } from '../components/NavFocus';
 import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
@@ -247,6 +248,7 @@ function TxTable({ txs }: { txs: Tx[] }) {
                   <td style={{ maxWidth: 320 }}>
                     <div className="ellipsis" title={t.text}>{t.text}</div>
                     <TxNotes tx={t} />
+                    {t.trade && <TradeLine tx={t} split />}
                     {t.bankCategory && <div className="small muted ellipsis">{t.bankCategory}{t.bankSubcategory ? ` › ${t.bankSubcategory}` : ''}</div>}
                   </td>
                   <td className="num"><Money v={t.amount} decimals colored /></td>

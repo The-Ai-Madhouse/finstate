@@ -100,6 +100,20 @@ export interface Tx {
   noAutoPair?: boolean;
   /** "Hører sammen": transaktioner med samme værdi er knyttet sammen af brugeren (kun en note – ændrer ikke regnskabet). */
   link?: string;
+  /** Køb/salg af værdipapirer med kurtage (fundet ved import). Ændrer intet af sig selv – bruges til at foreslå en opdeling. */
+  trade?: TradeInfo;
+}
+
+/** Kurtage på en handel (alle beløb i øre, uden fortegn). Køb: i alt = pris + kurtage. Salg: i alt = pris − kurtage. */
+export interface TradeInfo {
+  /** Kurtage og gebyrer. */
+  fee: number;
+  /** Købs- eller salgsprisen uden kurtage (kurs × antal). */
+  gross: number;
+  side: 'buy' | 'sell';
+  quantity?: number;
+  /** Kurs pr. stk. i øre. */
+  price?: number;
 }
 
 /** En importeret fil: hvilke transaktioner den indeholdt (også dem, der fandtes i forvejen). */
@@ -212,6 +226,10 @@ export interface ColumnMapping {
   note?: number;
   /** Kontonavn/-nummer i filen – bruges kun til at vælge konto automatisk. */
   accountName?: number;
+  /** Værdipapirhandel: kurtage/gebyrer, antal og kurs – så kurtagen kan skilles fra købs-/salgsprisen. */
+  fee?: number;
+  quantity?: number;
+  price?: number;
 }
 
 export interface Settings {

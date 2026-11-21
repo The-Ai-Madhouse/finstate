@@ -30,7 +30,7 @@ const OP_LABEL = { gt: 'Større end', lt: 'Mindre end', eq: 'Lig med', between: 
 /** Sorteringen for en kolonne: ↑, ↓ eller neutral. Dato ↑ (ældst først) er den neutrale rækkefølge for hele listen. */
 function dirOf(col: Col, sort: TxSort): Dir {
   if (col === 'date') return sort === 'date-desc' ? 'desc' : sort === 'date-asc' ? 'asc' : undefined;
-  if (col === 'amount') return sort === 'amount-asc' ? 'asc' : sort === 'amount-desc' ? 'desc' : undefined;
+  if (col === 'amount') return sort === 'amount-asc' || sort === 'signed-desc' ? 'asc' : sort === 'amount-desc' || sort === 'signed-asc' ? 'desc' : undefined;
   if (col === 'text') return sort === 'text-asc' ? 'asc' : sort === 'text-desc' ? 'desc' : undefined;
   return undefined;
 }
@@ -42,7 +42,8 @@ function nextSort(col: Col, sort: TxSort): TxSort {
   return !d ? 'text-asc' : d === 'asc' ? 'text-desc' : 'date-asc';
 }
 const SORT_TEXT: Partial<Record<TxSort, string>> = {
-  'date-asc': 'ældst først', 'date-desc': 'nyest først', 'amount-desc': 'største først', 'amount-asc': 'mindste først', 'text-asc': 'A–Å', 'text-desc': 'Å–A',
+  'date-asc': 'ældst først', 'date-desc': 'nyest først', 'amount-desc': 'største først', 'amount-asc': 'mindste først',
+  'signed-asc': 'største udgift først', 'signed-desc': 'største indtægt først', 'text-asc': 'A–Å', 'text-desc': 'Å–A',
 };
 const sortable = (c: Col) => c === 'date' || c === 'amount' || c === 'text';
 
@@ -100,10 +101,11 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
       case 'text': return f.q.trim() ? { text: `"${f.q.trim()}"`, on: true } : { text: 'Alle', on: false };
       case 'amount': {
         if (!amountActive(f)) return { text: 'Alle beløb', on: false };
-        if (f.amountOp === 'gt') return { text: `> ${amt(f.min)}`, on: true };
-        if (f.amountOp === 'lt') return { text: `< ${amt(f.max)}`, on: true };
-        if (f.amountOp === 'eq') return { text: `= ${amt(f.min)}`, on: true };
-        return { text: `${f.min?.trim() || '0'} – ${f.max?.trim() || '∞'} kr.`, on: true };
+        const dir = f.amountSign === 'in' ? 'Ind' : f.amountSign === 'out' ? 'Ud' : '';
+        const a = { ...f, amountSign: undefined };
+        const cmp = !amountActive(a) ? '' : f.amountOp === 'gt' ? `> ${amt(f.min)}` : f.amountOp === 'lt' ? `< ${amt(f.max)}` : f.amountOp === 'eq' ? `= ${amt(f.min)}`
+          : `${f.min?.trim() || '0'} – ${f.max?.trim() || '∞'} kr.`;
+        return { text: [dir, cmp].filter(Boolean).join(' · '), on: true };
       }
       case 'type': return { text: list(types.map((t) => TYPE_LABEL[t]), 'Alle typer'), on: types.length > 0 };
       case 'category': return { text: list(cats.map((c) => categoryLabel(categories, c)), 'Alle'), on: cats.length > 0 };
@@ -114,7 +116,7 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
   };
   const clear = (c: Col) => {
     const patch: Partial<LedgerFilter> =
-      c === 'date' ? { from: undefined, to: undefined } : c === 'text' ? { q: '' } : c === 'amount' ? { min: '', max: '', amountOp: undefined }
+      c === 'date' ? { from: undefined, to: undefined } : c === 'text' ? { q: '' } : c === 'amount' ? { min: '', max: '', amountOp: undefined, amountSign: undefined }
       : c === 'type' ? { type: 'all', types: [] } : c === 'category' ? { categoryId: undefined, categoryIds: [] } : c === 'account' ? { accountId: undefined, accountIds: [] }
       : c === 'status' ? { status: 'all', statuses: [] } : { withNote: false };
     set(patch);
@@ -180,7 +182,12 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
         );
         return (<>
           <div className="colfield">
-            <span className="colfield-label">Beløb <span className="muted">(uden fortegn – vælg retning under Type)</span></span>
+            <span className="colfield-label">Retning</span>
+            {seg((f.amountSign ?? 'all') as 'all' | 'in' | 'out', [['all', 'Alle'], ['in', '+ Penge ind'], ['out', '− Penge ud']],
+              (v) => set({ amountSign: v === 'all' ? undefined : v }), 'Retning')}
+          </div>
+          <div className="colfield">
+            <span className="colfield-label">Størrelse <span className="muted">(uden fortegn)</span></span>
             {seg((op ?? 'all') as 'all' | keyof typeof OP_LABEL, [['all', 'Alle'], ['gt', '>'], ['lt', '<'], ['eq', '='], ['between', 'Mellem']],
               (v) => {
                 if (v === 'all') { set({ amountOp: undefined, min: '', max: '' }); return; }
@@ -197,7 +204,7 @@ export function LedgerFilterBar({ total, shown }: { total: number; shown: number
               </div>
             )}
           </div>
-          {sortSeg('amount', [['none', 'Neutral'], ['amount-desc', '↓ Største først'], ['amount-asc', '↑ Mindste først']])}
+          {sortSeg('amount', [['none', 'Neutral'], ['amount-desc', '↓ Største først'], ['amount-asc', '↑ Mindste først'], ['signed-asc', '− Udgifter først'], ['signed-desc', '+ Indtægter først']])}
         </>);
       }
       case 'type': return multi('Type', (['income', 'expense', 'internal'] as TxType[]).map((k) => [k, TYPE_LABEL[k]]), types, setTypes);

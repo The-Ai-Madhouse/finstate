@@ -20,6 +20,8 @@ export interface TxFilter {
    * gt = større end min · lt = mindre end max · eq = lig med min · between = fra min til max. Uden: min/max som grænser.
    */
   amountOp?: 'gt' | 'lt' | 'eq' | 'between';
+  /** Kun penge ind (positive beløb) eller ud (negative beløb) – uanset hvordan de er kategoriseret. */
+  amountSign?: 'in' | 'out';
   withNote: boolean;
   sort: TxSort;
   /** Flervalg (som i et regneark). Tomme/uden = den enkelte værdi ovenfor (bruges, når andre sider linker hertil). */
@@ -39,7 +41,7 @@ export const typesOf = (f: TxFilter): TxType[] => (f.types?.length ? f.types : f
 export const statusesOf = (f: TxFilter): TxStatus[] => (f.statuses?.length ? f.statuses : f.status !== 'all' ? [f.status] : []);
 
 /** date-asc er den neutrale rækkefølge (som i banken). */
-export type TxSort = 'date-asc' | 'date-desc' | 'amount-desc' | 'amount-asc' | 'text-asc' | 'text-desc';
+export type TxSort = 'date-asc' | 'date-desc' | 'amount-desc' | 'amount-asc' | 'signed-asc' | 'signed-desc' | 'text-asc' | 'text-desc';
 
 /** Matcher søgeteksten beløbet? Dansk ("1.234,5" / "1234,50") og engelsk ("1234.5") skrivemåde. */
 export function amountMatches(amount: number, q: string): boolean {
@@ -81,6 +83,8 @@ export function filterTxs(txs: Tx[], resolved: Map<string, Resolved>, categories
     if (accs.size && !accs.has(t.accountId)) return false;
     if (f.from && t.date < f.from) return false;
     if (f.to && t.date > f.to) return false;
+    if (f.amountSign === 'in' && t.amount <= 0) return false;
+    if (f.amountSign === 'out' && t.amount >= 0) return false;
     const abs = Math.abs(t.amount);
     if (f.amountOp === 'gt') { if (min !== null && abs <= Math.abs(min)) return false; }
     else if (f.amountOp === 'lt') { if (max !== null && abs >= Math.abs(max)) return false; }
@@ -105,6 +109,9 @@ export function sortTxs(txs: Tx[], sort: TxFilter['sort']): Tx[] {
   else if (sort === 'date-desc') s.sort((a, b) => byDate(b, a));
   else if (sort === 'amount-desc') s.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount) || byDate(a, b));
   else if (sort === 'amount-asc') s.sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount) || byDate(a, b));
+  // Med fortegn: største udgift først (−→+) eller største indtægt først (+→−).
+  else if (sort === 'signed-asc') s.sort((a, b) => a.amount - b.amount || byDate(a, b));
+  else if (sort === 'signed-desc') s.sort((a, b) => b.amount - a.amount || byDate(a, b));
   else {
     const coll = new Intl.Collator('da', { sensitivity: 'base', numeric: true });
     const dir = sort === 'text-desc' ? -1 : 1;
@@ -120,5 +127,6 @@ export const activeFilterCount = (f: TxFilter) =>
 /** Er der et beløbsfilter, der faktisk filtrerer? */
 export function amountActive(f: TxFilter): boolean {
   const a = !!f.min?.trim(), b = !!f.max?.trim();
+  if (f.amountSign) return true;
   return f.amountOp === 'gt' || f.amountOp === 'eq' ? a : f.amountOp === 'lt' ? b : a || b;
 }
