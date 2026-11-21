@@ -46,7 +46,7 @@ export interface ParsedSheet {
 }
 
 const HEADER_HINTS: Record<keyof ColumnMapping, RegExp> = {
-  date: /^(bogf(ørings|orings)?dato|bogføringsdag|bogført|dato|date|posteringsdato|transaktionsdato|rentedato|handelsdag|valør(dato|dag)?)$/,
+  date: /^(bogf(ørings|orings)?dato|bogføringsdag|bogført|dato|date|posteringsdato|transaktionsdato|rentedato|handelsdag|handelsdato|trade date|booking date|valør(dato|dag)?)$/,
   text: /^(tekst|beskrivelse|text|description|posteringstekst|modtager|afsender|navn|meddelelse|title|transaktionstype|værdipapirer|værdipapir|transaktionstekst|instrument|køb\/salg|buy\/sell|handelstype)$/,
   amount: /^(beløb|belob|beløb i dkk|beløb \(dkk\)|amount|beløb dkk|amount \(dkk\)|booked amount|bogført beløb|afregningsbeløb|nettobeløb|net amount)$/,
   balance: /^(saldo|balance|saldo \(dkk\)|saldo i dkk|bogført saldo)$/,
@@ -55,8 +55,6 @@ const HEADER_HINTS: Record<keyof ColumnMapping, RegExp> = {
   note: /^(kommentar|note|notat|bemærkning|egen tekst|egen note)$/,
   accountName: /^(kontonavn|konto|account|account name|depot)$/,
   fee: /^(kurtage|courtage|commission|commissions|kommission|samlede afgifter|afgifter|gebyr|gebyrer|handelsgebyr|handelsomkostninger|transaktionsomkostninger|omkostninger|kurtage og gebyrer|kurtage \(dkk\)|kurtage dkk|fee|fees|total fees|trading fee|brokerage|brokerage fee)$/,
-  quantity: /^(antal|antal stk\.?|stk\.?|quantity|qty|shares|number of shares|antal aktier)$/,
-  price: /^(kurs|handelskurs|købskurs|salgskurs|pris|price|price per share|enhedspris|kurs \(dkk\))$/,
 };
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -101,10 +99,8 @@ export function guessMapping(sheet: ParsedSheet): Partial<ColumnMapping> {
   if (n >= 0) m.note = n;
   const an = find(HEADER_HINTS.accountName);
   if (an >= 0) m.accountName = an;
-  for (const k of ['fee', 'quantity', 'price'] as const) {
-    const i = find(HEADER_HINTS[k]);
-    if (i >= 0 && i !== m.amount) m[k] = i;
-  }
+  const fee = find(HEADER_HINTS.fee);
+  if (fee >= 0 && fee !== m.amount) m.fee = fee;
   const texts = h.map((c, i) => (HEADER_HINTS.text.test(c) ? i : -1)).filter((i) => i >= 0);
   if (texts.length) m.text = texts;
 
@@ -166,11 +162,7 @@ export function buildTxs(sheet: ParsedSheet, m: ColumnMapping, accountId: string
     const text = m.text.map((i) => (r[i] ?? '').trim()).filter(Boolean).join(' · ');
     const balance = m.balance !== undefined ? parseAmount(r[m.balance] ?? '') ?? undefined : undefined;
     const note = m.note !== undefined ? r[m.note]?.trim() || undefined : undefined;
-    const trade = tradeInfo(amount, text, {
-      fee: m.fee !== undefined ? r[m.fee] : undefined,
-      quantity: m.quantity !== undefined ? r[m.quantity] : undefined,
-      price: m.price !== undefined ? r[m.price] : undefined,
-    });
+    const trade = tradeInfo(amount, text, m.fee !== undefined ? r[m.fee] : undefined);
     parsed.push({
       ...(note ? { note } : {}),
       ...(trade ? { trade } : {}),
@@ -207,33 +199,20 @@ const num = (s?: string): number | null => {
 
 /** Kurtage i posteringsteksten: "… kurtage 29,00", "Kurt. 29", "commission: 1.50", "gebyr 15 kr". */
 const FEE_IN_TEXT = /(?:kurtage|kurt\.|courtage|commission|kommission|handelsgebyr|gebyr)\s*[:=]?\s*(?:kr\.?|dkk)?\s*(\d(?:[\d.,]*\d)?)/i;
-/** Antal og kurs i teksten: "Køb 10 stk Novo Nordisk B kurs 700,00", "Buy 5 x AAPL @ 180.50". */
-const QTY_IN_TEXT = /(\d(?:[\d.,]*\d)?)\s*(?:stk\.?|styk|x|shares)\b/i;
-const PRICE_IN_TEXT = /(?:kurs|@|price)\s*[:=]?\s*(\d(?:[\d.,]*\d)?)/i;
 const BUY_SELL = /\b(køb|købt|buy|bought|purchase)\b|\b(salg|sælg|solgt|sell|sold|sale)\b/i;
 
 /**
- * Finder kurtagen på en værdipapirhandel – fra en kurtagekolonne, fra teksten eller som forskellen mellem beløbet
- * og antal × kurs. Giver kun et resultat, når der faktisk er kurtage, og den er rimelig (under 5 % af handlen).
+ * Finder kurtagen på en værdipapirhandel – fra en kurtagekolonne eller fra teksten.
+ * Giver kun et resultat, når der faktisk er kurtage, og den er mindre end halvdelen af beløbet.
  */
-export function tradeInfo(amount: number, text: string, cols: { fee?: string; quantity?: string; price?: string } = {}): TradeInfo | undefined {
+export function tradeInfo(amount: number, text: string, feeCol?: string): TradeInfo | undefined {
   const total = Math.abs(amount);
   if (!total) return undefined;
   const bs = text.match(BUY_SELL);
   const side: TradeInfo['side'] = bs?.[2] ? 'sell' : bs?.[1] ? 'buy' : amount < 0 ? 'buy' : 'sell';
-  const qty = num(cols.quantity) ?? num(text.match(QTY_IN_TEXT)?.[1]);
-  const price = num(cols.price) ?? num(text.match(PRICE_IN_TEXT)?.[1]);
-  const quantity = qty !== null ? Math.abs(qty) : undefined;
-  const priceOre = price !== null ? Math.round(Math.abs(price) * 100) : undefined;
-  let fee = num(cols.fee);
-  if (fee === null) fee = num(text.match(FEE_IN_TEXT)?.[1]);
-  let feeOre = fee !== null ? Math.round(Math.abs(fee) * 100) : 0;
-  // Ingen kurtagekolonne: forskellen mellem beløbet og antal × kurs (kun hvis den er lille – ellers er det fx en anden valuta).
-  if (!feeOre && quantity && priceOre) {
-    const diff = Math.abs(total - Math.round(quantity * priceOre));
-    if (diff > 0 && diff < total * 0.05) feeOre = diff;
-  }
+  const fee = num(feeCol) ?? num(text.match(FEE_IN_TEXT)?.[1]);
+  const feeOre = fee !== null ? Math.round(Math.abs(fee) * 100) : 0;
   if (!feeOre || feeOre >= total * 0.5) return undefined;
   const gross = side === 'buy' ? total - feeOre : total + feeOre;
-  return { fee: feeOre, gross, side, ...(quantity ? { quantity } : {}), ...(priceOre ? { price: priceOre } : {}) };
+  return { fee: feeOre, gross, side };
 }

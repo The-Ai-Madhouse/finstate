@@ -160,8 +160,6 @@ const FIELDS: { k: keyof ColumnMapping; label: string; required?: boolean; help:
   { k: 'subcategory', label: 'Bankens underkategori', help: 'Kun til forslag' },
   { k: 'accountName', label: 'Kontonavn', help: 'Vælger kontoen automatisk' },
   { k: 'fee', label: 'Kurtage/gebyr', help: 'Værdipapirhandel: kurtagen skilles fra købsprisen' },
-  { k: 'quantity', label: 'Antal', help: 'Værdipapirhandel: antal stk.' },
-  { k: 'price', label: 'Kurs', help: 'Værdipapirhandel: kurs pr. stk.' },
 ];
 
 function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: (p: Pending) => void; onDone: (msg: string) => void; onCancel: () => void }) {
@@ -174,9 +172,12 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
     const h = accountHint(p.sheet, p.mapping) ?? '';
     return broker && /^\d+$/.test(h.trim()) ? 'Depot' : h;
   });
-  const [setupSecurities, setSetupSecurities] = useState(true);
+  // Opret kun værdipapir-posten og interne flytninger, hvis man selv vælger det.
+  const [setupSecurities, setSetupSecurities] = useState(false);
   const complete = isCompleteMapping(p.mapping);
   const [showCols, setShowCols] = useState(!complete);
+  const [showFile, setShowFile] = useState(false);
+  const [showTxs, setShowTxs] = useState(true);
   const built = complete && p.accountId ? buildTxs(p.sheet, p.mapping as ColumnMapping, p.accountId) : undefined;
   const fileDates = built?.txs.map((t) => t.date).sort() ?? [];
   const fileFirst = fileDates[0];
@@ -259,7 +260,6 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
     ['Saldo', colName(p.mapping.balance)],
     ['Kommentar', colName(p.mapping.note)],
     ['Kurtage', colName(p.mapping.fee)],
-    ['Antal × kurs', p.mapping.quantity !== undefined && p.mapping.price !== undefined ? `${colName(p.mapping.quantity)} × ${colName(p.mapping.price)}` : undefined],
   ].filter(([, v]) => v);
 
   return (
@@ -290,7 +290,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
           <label htmlFor={`depot-${p.key}`} className="small">
             <b>Det ligner en depot-eksport (fx fra en netbroker).</b> Saldoen er depotets <i>kontanter</i>. Et køb af værdipapirer er ikke en udgift – pengene flytter bare til dine værdipapirer.
             <div className="ink2" style={{ marginTop: 4 }}>
-              Sæt kryds, så opretter jeg aktivposten <b>"{(data.accounts.find((a) => a.id === p.accountId)?.name ?? newName) || 'Depot'} – værdipapirer"</b>{data.settings.rulesEnabled ? ' og regler' : ''}, så KØBT/SOLGT bogføres som
+              Vil du have det, så sæt kryds – så opretter jeg aktivposten <b>"{(data.accounts.find((a) => a.id === p.accountId)?.name ?? newName) || 'Depot'} – værdipapirer"</b>{data.settings.rulesEnabled ? ' og regler' : ''}, så KØBT/SOLGT bogføres som
               intern flytning dertil og UDBYTTE som indtægt. Skriv depotets værdi pr. periodeslut under Aktiver & passiver – stigningen bliver så til afkast.
             </div>
           </label>
@@ -298,13 +298,15 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
       )}
 
       <div className="section-label">2 · Hvad står i filens kolonner?</div>
-      {complete && !showCols ? (
+      {complete && !showCols ? (<>
         <div className="row" style={{ marginBottom: 12 }}>
           <span className="chip user">Genkendt automatisk ✓</span>
           <span className="small ink2">{detected.map(([k, v]) => `${k}: ${v}`).join(' · ')}</span>
           <button className="btn sm ghost" onClick={() => setShowCols(true)}>Ret kolonner</button>
+          <button className="btn sm ghost" onClick={() => setShowFile((x) => !x)} aria-expanded={showFile}>{showFile ? 'Skjul filen ▴' : `Vis filens ${p.sheet.rows.length} rækker ▾`}</button>
         </div>
-      ) : (
+        {showFile && <FileRows sheet={p.sheet} />}
+      </>) : (
         <>
           <InfoBox label="Hvad er kolonnevalget?">
             Her fortæller du kun Finstate, <b>hvilken kolonne i filen der indeholder hvad</b> – det har intet med din kategorisering at gøre.
@@ -316,14 +318,7 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
               <label key={f.k} className="field">{f.label} {colSelect(f.k, p.mapping[f.k] as number | undefined, !f.required)}<span className="muted">{f.help}</span></label>
             ))}
           </div>
-          <div className="table-wrap" style={{ marginBottom: 12 }}>
-            <table>
-              <thead><tr>{p.sheet.header.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
-              <tbody>
-                {p.sheet.rows.slice(0, 4).map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className="small ellipsis" style={{ maxWidth: 220 }}>{c}</td>)}</tr>)}
-              </tbody>
-            </table>
-          </div>
+          <FileRows sheet={p.sheet} />
         </>
       )}
 
@@ -382,6 +377,46 @@ function PendingCard({ p, onChange, onDone, onCancel }: { p: Pending; onChange: 
           </button>
         </div>
       )}
+      {preview && preview.txs.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <button className="btn sm ghost" onClick={() => setShowTxs((x) => !x)} aria-expanded={showTxs}>
+            {showTxs ? '▾' : '▸'} De {preview.txs.length} transaktioner i filen{from && to ? ` (${dateDa(from)} – ${dateDa(to)})` : ''}
+          </button>
+          {showTxs && (
+            <div className="table-wrap import-scroll" style={{ marginTop: 6 }}>
+              <table className="small">
+                <thead><tr><th>Dato</th><th>Tekst</th><th className="num">Beløb</th><th className="num">Saldo</th><th>Kurtage</th><th /></tr></thead>
+                <tbody>
+                  {preview.txs.map((t) => (
+                    <tr key={t.id} className={existingById.has(t.id) ? 'muted' : ''}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{dateDa(t.date)}</td>
+                      <td className="ellipsis" style={{ maxWidth: 360 }} title={t.text}>{t.text}</td>
+                      <td className="num"><Money v={t.amount} decimals colored /></td>
+                      <td className="num">{t.balance !== undefined ? <Money v={t.balance} decimals /> : ''}</td>
+                      <td className="num">{t.trade ? <Money v={t.trade.fee} decimals /> : ''}</td>
+                      <td>{existingById.has(t.id) ? <span className="chip">findes</span> : <span className="chip user">ny</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Hele filen, som den står – alle rækker, med lodret scroll og faste kolonneoverskrifter. */
+function FileRows({ sheet }: { sheet: ParsedSheet }) {
+  return (
+    <div className="table-wrap import-scroll" style={{ marginBottom: 12 }}>
+      <table>
+        <thead><tr><th className="muted">#</th>{sheet.header.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
+        <tbody>
+          {sheet.rows.map((r, i) => <tr key={i}><td className="small muted num">{i + 1}</td>{r.map((c, j) => <td key={j} className="small ellipsis" style={{ maxWidth: 220 }}>{c}</td>)}</tr>)}
+        </tbody>
+      </table>
     </div>
   );
 }

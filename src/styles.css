@@ -239,6 +239,10 @@ tr.click { cursor: pointer; }
 tr.click:hover td { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
 tr.click td { transition: background 0.15s; }
 .table-wrap { overflow-x: auto; }
+/* Importens forhåndsvisning: alle rækker med lodret scroll og faste overskrifter. */
+.table-wrap.import-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.import-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); box-shadow: 0 1px 0 var(--line); }
+.import-scroll tr.muted td { color: var(--muted); }
 
 /* Statuslinjer */
 .check { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }

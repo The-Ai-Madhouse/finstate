@@ -108,12 +108,9 @@ export interface Tx {
 export interface TradeInfo {
   /** Kurtage og gebyrer. */
   fee: number;
-  /** Købs- eller salgsprisen uden kurtage (kurs × antal). */
+  /** Købs- eller salgsprisen uden kurtage. */
   gross: number;
   side: 'buy' | 'sell';
-  quantity?: number;
-  /** Kurs pr. stk. i øre. */
-  price?: number;
 }
 
 /** En importeret fil: hvilke transaktioner den indeholdt (også dem, der fandtes i forvejen). */
@@ -226,10 +223,8 @@ export interface ColumnMapping {
   note?: number;
   /** Kontonavn/-nummer i filen – bruges kun til at vælge konto automatisk. */
   accountName?: number;
-  /** Værdipapirhandel: kurtage/gebyrer, antal og kurs – så kurtagen kan skilles fra købs-/salgsprisen. */
+  /** Værdipapirhandel: kurtage/gebyrer – så kurtagen kan skilles fra købs-/salgsprisen. */
   fee?: number;
-  quantity?: number;
-  price?: number;
 }
 
 export interface Settings {
