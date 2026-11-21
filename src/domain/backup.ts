@@ -70,5 +70,11 @@ export function applyBackup(cur: AppData, b: BackupFile, mode: 'replace' | 'merg
     periods: mergeById(cur.periods, d.periods),
     slideNotes: { ...cur.slideNotes, ...(d.slideNotes ?? {}) },
     importProfiles: { ...cur.importProfiles, ...(d.importProfiles ?? {}) },
+    budget: d.budget
+      ? {
+          subscriptions: mergeById(cur.budget?.subscriptions ?? [], d.budget.subscriptions),
+          dismissed: [...new Set([...(cur.budget?.dismissed ?? []), ...(d.budget.dismissed ?? [])])],
+        }
+      : cur.budget,
   };
 }

@@ -8,10 +8,13 @@ npm start        # åbner http://127.0.0.1:5173
 npm test         # tests af regnskabsmotoren
 ```
 
-> **Login med 2FA og kryptering.** Første gang vælger du en adgangskode og tilføjer Finstate i en 2FA-app
-> (Google Authenticator, 1Password …). Login holder i 4 uger pr. enhed. Data gemmes **krypteret** (AES-256-GCM) i
-> `~/Documents/Finstate/` (anden mappe: `FINSTATE_DIR=/sti npm start` – altid uden for projektet) og kan kun låses
-> op med adgangskode + 2FA. Glemmer du adgangskoden, kan data ikke gendannes.
+> **Lokalt: intet login. På netværket: login med 2FA.** Med `npm start` kører Finstate kun på din computer (127.0.0.1), og der er
+> intet login. Data gemmes stadig **krypteret** (AES-256-GCM) i `~/Documents/Finstate/` (anden mappe: `FINSTATE_DIR=/sti npm start`
+> – altid uden for projektet); nøglen ligger i `local.key` i samme mappe og kan kun læses af din bruger.
+> Kører Finstate på netværket (`npm run serve`, fx på en Raspberry Pi), kræves adgangskode + 2FA-app (Google Authenticator,
+> 1Password …); login holder i 4 uger pr. enhed. Når login sættes op, låser det samme nøgle op, og `local.key` slettes – så data
+> kun kan læses med adgangskode + 2FA. Åbner du en mappe med login lokalt (fx en backup fra Pi'en), låser du den op én gang.
+> `FINSTATE_LOGIN=on|off` overstyrer standarden. Glemmer du adgangskoden til en mappe uden `local.key`, kan data ikke gendannes.
 >
 > **Versioner** (knappen øverst): gem en navngiven milepæl, se hvad der er ændret siden, og gå tilbage.
 >
@@ -22,6 +25,11 @@ npm test         # tests af regnskabsmotoren
 > **Raspberry Pi:** `npm run build && npm run serve` kører Finstate som selvstændig server. Se
 > [deploy/RASPBERRY-PI.md](deploy/RASPBERRY-PI.md) for sikker opsætning **kun på hjemmenetværket** (HTTPS, firewall, afviser alt udefra),
 > systemd og backup til din computer (`scripts/backup-from-pi.sh`).
+
+> **Dagligt budget – abonnementer & regninger** (i menuen under *Dagligt budget*): adskilt fra financial statementet og
+> uden periode. Finstate finder selv dine faste træk (samme modtager med fast rytme – måned, kvartal, halvår eller år – og
+> nogenlunde samme beløb) og viser dem i en kalender med ✓ for betalte, næste store regning og de næste 12 måneder.
+> Har den taget fejl, så ret abonnementet eller skjul det; mangler der et, så tilføj det. Kun dine rettelser gemmes.
 
 ## Privatliv
 - Ingen server, intet login, ingen analytics. En Content-Security-Policy i `index.html` forhindrer siden i at

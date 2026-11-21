@@ -422,6 +422,27 @@ function SecurityCard() {
   const [asking, setAsking] = useState<'all' | 'codes'>();
   useEffect(() => { authStatus().then(setSt).catch(() => {}); }, []);
   const out = async (everywhere: boolean) => { flushSave(); await logout(everywhere); location.reload(); };
+  if (st?.local || save.local) {
+    return (
+      <div className="card">
+        <h2>Sikkerhed</h2>
+        <div className="col" style={{ gap: 10 }}>
+          <div className="small ink2">
+            🔒 Finstate kører kun på din computer, så der er intet login. Dine data er krypteret (AES-256) i <code>{save.dir ?? '…'}</code>,
+            og nøglen ligger i <code>local.key</code> i samme mappe – kun din bruger på computeren kan læse den.
+            Kører du Finstate på netværket (fx en Raspberry Pi med <code>npm run serve</code>), kræves login med adgangskode og 2FA.
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <a className="btn primary" href="/api/backup" download>Download backup</a>
+          </div>
+          <InfoBox label="Backup til din computer">
+            Backuppen indeholder dine krypterede data <b>og nøglen</b> – opbevar den lige så sikkert som dine kontoudtog.
+            Pak den ud med <code>node scripts/unpack-backup.mjs fil.json ~/Documents/FinstateBackup</code> og åbn den med <code>FINSTATE_DIR=~/Documents/FinstateBackup npm start</code>.
+          </InfoBox>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="card">
       <h2>Sikkerhed</h2>

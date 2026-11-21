@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Pak en krypteret Finstate-backup (downloadet under Indstillinger → Backup & data) ud til en mappe.
- * Indholdet forbliver krypteret – åbn det med samme adgangskode og 2FA:
+ * Indholdet forbliver krypteret – åbn det med samme adgangskode og 2FA (eller, for en backup fra lokal brug, med nøglen i local.key):
  *
  *   node scripts/unpack-backup.mjs finstate-krypteret-backup-2026-11-17.json ~/Documents/FinstateBackup
  *   FINSTATE_DIR=~/Documents/FinstateBackup npm start
@@ -18,7 +18,8 @@ if (!file || !target) {
 const dir = resolve(target.replace(/^~(?=$|\/)/, homedir()));
 const b = JSON.parse(await readFile(file, 'utf8'));
 if (b.format !== 'finstate-encrypted-backup') { console.error('Det er ikke en krypteret Finstate-backup.'); process.exit(1); }
-if (await stat(join(dir, 'auth.json')).then(() => true, () => false)) {
+const has = (f) => stat(join(dir, f)).then(() => true, () => false);
+if ((await has('auth.json')) || (await has('local.key')) || (await has('finstate.json'))) {
   console.error(`${dir} indeholder allerede Finstate-data – vælg en tom mappe, så intet overskrives.`);
   process.exit(1);
 }

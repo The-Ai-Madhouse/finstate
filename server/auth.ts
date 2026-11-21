@@ -57,11 +57,12 @@ export class Auth {
   private save(a: AuthFile) { return this.write(this.file, JSON.stringify(a, null, 2)); }
 
   /** Trin 1: vælg adgangskode → få en 2FA-hemmelighed at scanne. */
-  async setupStart(password: string) {
+  /** existingDek: datanøglen fra lokal brug (local.key) – så data, der allerede er krypteret, kan læses med det nye login. */
+  async setupStart(password: string, existingDek?: Buffer) {
     if (await this.configured()) throw new AuthError('Login er allerede sat op.', 409);
     if (password.length < 10) throw new AuthError('Adgangskoden skal være mindst 10 tegn.', 400);
     const kdf = newKdf();
-    const dek = newDataKey();
+    const dek = existingDek ?? newDataKey();
     const dekByPassword = seal(passwordKey(password, kdf), dek, 'dek');
     const secret = newTotpSecret();
     const ticket = randomTicket();
@@ -126,7 +127,7 @@ export class Auth {
     a.failures = undefined;
     const session = this.addSession(a, dek, label);
     await this.save(a);
-    return { ...session, recoveryLeft: a.recovery.length };
+    return { ...session, dek, recoveryLeft: a.recovery.length };
   }
 
   /** Datanøglen for et login – eller undefined, hvis det er ugyldigt/udløbet. */

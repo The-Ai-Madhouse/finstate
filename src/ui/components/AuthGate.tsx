@@ -1,6 +1,12 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
-export interface AuthStatus { configured: boolean; loggedIn: boolean; expiresAt?: string; recoveryLeft?: number; sessions?: number }
+export interface AuthStatus {
+  configured: boolean; loggedIn: boolean; expiresAt?: string; recoveryLeft?: number; sessions?: number;
+  /** Kører lokalt på computeren – intet login. */
+  local?: boolean;
+  /** Lokalt, men mappen har et login (fx en backup fra Pi'en): lås op én gang med adgangskode + 2FA. */
+  unlockOnce?: boolean;
+}
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -33,14 +39,14 @@ export function AuthGate({ onReady }: { onReady: () => void }) {
   }
   if (!status) return <div className="boot">Forbinder …</div>;
   if (!status.configured) return <Setup onDone={onReady} />;
-  return <Login onDone={onReady} />;
+  return <Login onDone={onReady} unlockOnce={status.unlockOnce} />;
 }
 
 export function Screen({ title, children, wide }: { title: string; children: ReactNode; wide?: boolean }) {
   return (
     <div className="auth-page">
       <div className={`card auth-card ${wide ? 'wide' : ''}`}>
-        <div className="auth-brand">◐ Finstate</div>
+        <div className="auth-brand"><span className="brand-mark" aria-hidden>◐</span>Finstate</div>
         <h2>{title}</h2>
         {children}
       </div>
@@ -49,7 +55,7 @@ export function Screen({ title, children, wide }: { title: string; children: Rea
 }
 
 /** Login: adgangskode + 6-cifret kode fra 2FA-appen (eller en gendannelseskode). */
-export function Login({ onDone, again }: { onDone: () => void; again?: boolean }) {
+export function Login({ onDone, again, unlockOnce }: { onDone: () => void; again?: boolean; unlockOnce?: boolean }) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState<string>();
@@ -61,7 +67,8 @@ export function Login({ onDone, again }: { onDone: () => void; again?: boolean }
     try { await post('/api/auth/login', { password, code }); onDone(); } catch (err) { setError((err as Error).message); setCode(''); } finally { setBusy(false); }
   };
   return (
-    <Screen title={again ? 'Log ind igen' : 'Log ind'}>
+    <Screen title={unlockOnce ? 'Lås dine data op – én gang' : again ? 'Log ind igen' : 'Log ind'}>
+      {unlockOnce && <p className="small ink2">Datamappen har et login (fx en backup fra din Raspberry Pi). Lås den op med adgangskode og 2FA én gang – derefter kører Finstate uden login her på computeren.</p>}
       {again && <p className="small ink2">Dit login er udløbet eller logget ud. Dine ændringer gemmes, så snart du er logget ind.</p>}
       <form className="col" style={{ gap: 12 }} onSubmit={submit}>
         <label className="field">Adgangskode<input type="password" autoComplete="current-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} /></label>
@@ -69,9 +76,9 @@ export function Login({ onDone, again }: { onDone: () => void; again?: boolean }
           ? <label className="field">Gendannelseskode<input autoComplete="off" value={code} placeholder="xxxxx-xxxxx" onChange={(e) => setCode(e.target.value)} /></label>
           : <label className="field">Kode fra din 2FA-app<input inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} placeholder="123 456" onChange={(e) => setCode(e.target.value.replace(/[^\d ]/g, ''))} className="code-input" /></label>}
         {error && <div className="banner error">{error}</div>}
-        <button className="btn primary" disabled={busy || !password || !code}>{busy ? 'Logger ind …' : 'Log ind'}</button>
+        <button className="btn primary" disabled={busy || !password || !code}>{busy ? 'Låser op …' : unlockOnce ? 'Lås op' : 'Log ind'}</button>
         <button type="button" className="btn ghost sm" onClick={() => { setUseRecovery(!useRecovery); setCode(''); }}>{useRecovery ? 'Brug koden fra appen' : 'Mistet telefonen? Brug en gendannelseskode'}</button>
-        <p className="small muted" style={{ margin: 0 }}>Du forbliver logget ind i 4 uger på denne enhed.</p>
+        {!unlockOnce && <p className="small muted" style={{ margin: 0 }}>Du forbliver logget ind i 4 uger på denne enhed.</p>}
       </form>
     </Screen>
   );

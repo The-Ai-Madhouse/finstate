@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import { parseAmount, parseDate } from './format';
-import type { ColumnMapping, Tx } from './types';
+import type { ColumnMapping, TradeInfo, Tx } from './types';
 import { hash } from './util';
 
 /**
@@ -46,14 +46,15 @@ export interface ParsedSheet {
 }
 
 const HEADER_HINTS: Record<keyof ColumnMapping, RegExp> = {
-  date: /^(bogf(ørings|orings)?dato|bogføringsdag|bogført|dato|date|posteringsdato|transaktionsdato|rentedato|handelsdag|valør(dato|dag)?)$/,
-  text: /^(tekst|beskrivelse|text|description|posteringstekst|modtager|afsender|navn|meddelelse|title|transaktionstype|værdipapirer|transaktionstekst)$/,
-  amount: /^(beløb|belob|beløb i dkk|beløb \(dkk\)|amount|beløb dkk|amount \(dkk\))$/,
+  date: /^(bogf(ørings|orings)?dato|bogføringsdag|bogført|dato|date|posteringsdato|transaktionsdato|rentedato|handelsdag|handelsdato|trade date|booking date|valør(dato|dag)?)$/,
+  text: /^(tekst|beskrivelse|text|description|posteringstekst|modtager|afsender|navn|meddelelse|title|transaktionstype|værdipapirer|værdipapir|transaktionstekst|instrument|køb\/salg|buy\/sell|handelstype)$/,
+  amount: /^(beløb|belob|beløb i dkk|beløb \(dkk\)|amount|beløb dkk|amount \(dkk\)|booked amount|bogført beløb|afregningsbeløb|nettobeløb|net amount)$/,
   balance: /^(saldo|balance|saldo \(dkk\)|saldo i dkk|bogført saldo)$/,
   category: /^(kategori|category|hovedkategori)$/,
   subcategory: /^(underkategori|subcategory|sub-kategori)$/,
   note: /^(kommentar|note|notat|bemærkning|egen tekst|egen note)$/,
   accountName: /^(kontonavn|konto|account|account name|depot)$/,
+  fee: /^(kurtage|courtage|commission|commissions|kommission|samlede afgifter|afgifter|gebyr|gebyrer|handelsgebyr|handelsomkostninger|transaktionsomkostninger|omkostninger|kurtage og gebyrer|kurtage \(dkk\)|kurtage dkk|fee|fees|total fees|trading fee|brokerage|brokerage fee)$/,
 };
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -98,6 +99,8 @@ export function guessMapping(sheet: ParsedSheet): Partial<ColumnMapping> {
   if (n >= 0) m.note = n;
   const an = find(HEADER_HINTS.accountName);
   if (an >= 0) m.accountName = an;
+  const fee = find(HEADER_HINTS.fee);
+  if (fee >= 0 && fee !== m.amount) m.fee = fee;
   const texts = h.map((c, i) => (HEADER_HINTS.text.test(c) ? i : -1)).filter((i) => i >= 0);
   if (texts.length) m.text = texts;
 
@@ -159,8 +162,10 @@ export function buildTxs(sheet: ParsedSheet, m: ColumnMapping, accountId: string
     const text = m.text.map((i) => (r[i] ?? '').trim()).filter(Boolean).join(' · ');
     const balance = m.balance !== undefined ? parseAmount(r[m.balance] ?? '') ?? undefined : undefined;
     const note = m.note !== undefined ? r[m.note]?.trim() || undefined : undefined;
+    const trade = tradeInfo(amount, text, m.fee !== undefined ? r[m.fee] : undefined);
     parsed.push({
       ...(note ? { note } : {}),
+      ...(trade ? { trade } : {}),
       accountId,
       date,
       text,
@@ -182,4 +187,32 @@ export function buildTxs(sheet: ParsedSheet, m: ColumnMapping, accountId: string
     return { ...p, id: `tx-${hash(base + '|' + n)}`, seq: i, importedAt: now };
   });
   return { txs, errors, reversed };
+}
+
+// ------------------------------------------------------------------ kurtage
+
+const num = (s?: string): number | null => {
+  if (!s?.trim()) return null;
+  const a = parseAmount(s);
+  return a === null ? null : a / 100;
+};
+
+/** Kurtage i posteringsteksten: "… kurtage 29,00", "Kurt. 29", "commission: 1.50", "gebyr 15 kr". */
+const FEE_IN_TEXT = /(?:kurtage|kurt\.|courtage|commission|kommission|handelsgebyr|gebyr)\s*[:=]?\s*(?:kr\.?|dkk)?\s*(\d(?:[\d.,]*\d)?)/i;
+const BUY_SELL = /\b(køb|købt|buy|bought|purchase)\b|\b(salg|sælg|solgt|sell|sold|sale)\b/i;
+
+/**
+ * Finder kurtagen på en værdipapirhandel – fra en kurtagekolonne eller fra teksten.
+ * Giver kun et resultat, når der faktisk er kurtage, og den er mindre end halvdelen af beløbet.
+ */
+export function tradeInfo(amount: number, text: string, feeCol?: string): TradeInfo | undefined {
+  const total = Math.abs(amount);
+  if (!total) return undefined;
+  const bs = text.match(BUY_SELL);
+  const side: TradeInfo['side'] = bs?.[2] ? 'sell' : bs?.[1] ? 'buy' : amount < 0 ? 'buy' : 'sell';
+  const fee = num(feeCol) ?? num(text.match(FEE_IN_TEXT)?.[1]);
+  const feeOre = fee !== null ? Math.round(Math.abs(fee) * 100) : 0;
+  if (!feeOre || feeOre >= total * 0.5) return undefined;
+  const gross = side === 'buy' ? total - feeOre : total + feeOre;
+  return { fee: feeOre, gross, side };
 }

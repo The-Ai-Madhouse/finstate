@@ -166,7 +166,7 @@ function AccountRow({ acc, row, period, expanded, onToggle, onSources, justAdded
   return (
     <Fragment>
       <tr data-postrow={acc.id} data-focus={`post:${acc.id}`} className={`click ${expanded ? 'expanded' : ''} ${over ? 'drop-over' : ''}`}
-        onClick={(ev) => { if (!(ev.target as HTMLElement).closest('input,button,select,.drag-handle')) onToggle(); }}
+        onClick={(ev) => { if (!(ev.target as HTMLElement).closest('input,button,select,.drag-handle,.combo-list')) onToggle(); }}
         draggable={draggable}
         onDragStart={(ev) => { dragging = { id: acc.id, side: row.side }; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', acc.id); }}
         onDragEnd={() => { dragging = undefined; setDraggable(false); }}
