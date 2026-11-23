@@ -1,3 +1,4 @@
+import { clientBackend, forgetChoice } from '../../store/clientStore';
 import { CategoriesSettings } from './CategoriesSettings';
 import { compareOptions } from '../../domain/periods';
 import { deleteStatement, withNewPeriod } from '../components/PeriodPrompt';
@@ -422,6 +423,41 @@ function SecurityCard() {
   const [asking, setAsking] = useState<'all' | 'codes'>();
   useEffect(() => { authStatus().then(setSt).catch(() => {}); }, []);
   const out = async (everywhere: boolean) => { flushSave(); await logout(everywhere); location.reload(); };
+  if (save.client) {
+    const backup = async () => {
+      flushSave();
+      const files = await clientBackend()!.backupFiles();
+      const stamp = new Date().toISOString().slice(0, 10);
+      const blob = new Blob([JSON.stringify({ format: 'finstate-encrypted-backup', version: 1, createdAt: new Date().toISOString(), files })], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `finstate-${save.client === 'folder' ? 'krypteret-' : ''}backup-${stamp}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    return (
+      <div className="card">
+        <h2>Sikkerhed og placering</h2>
+        <div className="col" style={{ gap: 10 }}>
+          <div className="small ink2">
+            {save.client === 'folder'
+              ? <>🔒 Dine data ligger i mappen <code>{save.dir}</code> på denne computer – krypteret (AES-256) med nøglen i <code>local.key</code> i samme mappe.
+                  Serveren viser kun appen og gemmer intet. Samme mappe kan åbnes med <code>npm start</code> direkte på computeren.</>
+              : <>Dine data ligger i <b>browserens eget lager</b> på denne computer (ikke krypteret, kun i denne browser). Serveren gemmer intet.
+                  Ryddes browserens data, forsvinder de – tag jævnligt en backup.</>}
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn primary" onClick={backup}>Download backup</button>
+            <button className="btn" onClick={async () => { flushSave(); await forgetChoice(); location.reload(); }}>Skift placering …</button>
+          </div>
+          <InfoBox label="Backup og andre computere">
+            Backuppen kan pakkes ud med <code>node scripts/unpack-backup.mjs fil.json ~/Documents/Finstate</code> og derefter vælges som mappe her –
+            eller åbnes med <code>npm start</code>. Hver computer har sine egne data; flyt dem med en backup.
+          </InfoBox>
+        </div>
+      </div>
+    );
+  }
   if (st?.local || save.local) {
     return (
       <div className="card">

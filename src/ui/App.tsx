@@ -35,6 +35,7 @@ const RESULTS: { id: View; label: string; icon: string }[] = [
 export function App() {
   const saveMode = useStore((s) => s.saveStatus.mode);
   const localMode = useStore((s) => s.saveStatus.local);
+  const clientMode = useStore((s) => s.saveStatus.client);
   const view = useStore((s) => s.view);
   const engine = useEngine();
   const period = usePeriod();
@@ -87,7 +88,7 @@ export function App() {
           <NavItem id="settings" label="Indstillinger" icon={<span className="step">⚙</span>} />
         </div>
         <div className="nav-foot">
-          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : localMode ? 'Krypteret og kører kun på din computer.' : 'Krypteret og kræver login med 2FA.'}
+          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : clientMode === 'folder' ? 'Gemt krypteret i en mappe på denne computer.' : clientMode === 'browser' ? 'Gemt i browseren på denne computer.' : localMode ? 'Krypteret og kører kun på din computer.' : 'Krypteret og kræver login med 2FA.'}
           <div className="nav-version" title={VERSION_DETAILS}>{VERSION_LABEL}</div>
         </div>
       </nav>
@@ -139,7 +140,10 @@ function TopBar() {
           ? <span className="crumb">Financial statement · <b>{period.name}</b> <span className="muted">({period.start} – {period.end})</span></span>
           : <span className="crumb muted">Intet financial statement valgt</span>}
         <span className="spacer" />
-        {save.mode === 'file'
+        {save.mode === 'file' && save.client
+          ? <span className="chip user" title={`${save.client === 'folder' ? `Krypteret (AES-256) i mappen ${save.dir} på denne computer` : 'I browserens lager på denne computer (ikke krypteret)'}${save.savedAt ? ` · senest gemt ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>
+              {save.client === 'folder' ? `🔒 Gemt i ${save.dir}` : '💾 Gemt i browseren'}</span>
+          : save.mode === 'file'
           ? <span className="chip user" title={`Krypteret (AES-256) i ${save.dir}/finstate.json${save.savedAt ? ` · senest gemt ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>🔒 Krypteret og gemt</span>
           : save.mode === 'error' ? <span className="chip review" title={save.error}>⚠ Ikke gemt</span> : null}
         <button className="btn sm" onClick={() => setView('versions')} title="Gem en version (milepæl), se ændringer siden – og gå tilbage">🕘 Versioner</button>

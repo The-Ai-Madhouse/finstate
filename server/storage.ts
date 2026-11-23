@@ -154,6 +154,12 @@ export interface HandlerOptions {
   requireLogin?: boolean;
 }
 
+/**
+ * FINSTATE_DATA=client: serveren viser kun appen. Data ligger på den computer, man åbner siden fra (en mappe, man vælger
+ * i browseren – eller browserens eget lager), så serveren har hverken data, nøgler eller login.
+ */
+export const dataOnClient = () => (process.env.FINSTATE_DATA ?? '').trim().toLowerCase() === 'client';
+
 /** FINSTATE_LOGIN=on|off overstyrer standarden. */
 export function loginRequired(fallback: boolean): boolean {
   const v = (process.env.FINSTATE_LOGIN ?? '').trim().toLowerCase();
@@ -167,6 +173,11 @@ export function handler(root: string, opts: HandlerOptions = {}) {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (!url.pathname.startsWith('/api/')) return next();
     if (!allowed(req)) return send(res, 403, { error: 'Kun Finstate selv har adgang.' });
+    if (dataOnClient()) {
+      if (url.pathname === '/api/auth/status') return send(res, 200, { configured: true, loggedIn: true, client: true });
+      if (url.pathname === '/api/storage') return send(res, 200, { client: true });
+      return send(res, 404, { error: 'Dine data ligger på din egen computer – ikke på serveren.' });
+    }
     let dir: string;
     try { dir = storageDir(root); } catch (e) { return send(res, 500, { error: (e as Error).message }); }
     await mkdir(dir, { recursive: true, mode: 0o700 });

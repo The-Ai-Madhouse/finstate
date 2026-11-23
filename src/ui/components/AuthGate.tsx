@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { ClientGate } from './ClientGate';
 
 export interface AuthStatus {
   configured: boolean; loggedIn: boolean; expiresAt?: string; recoveryLeft?: number; sessions?: number;
@@ -6,6 +7,8 @@ export interface AuthStatus {
   local?: boolean;
   /** Lokalt, men mappen har et login (fx en backup fra Pi'en): lås op én gang med adgangskode + 2FA. */
   unlockOnce?: boolean;
+  /** Serveren viser kun appen – data ligger på denne computer (FINSTATE_DATA=client). */
+  client?: boolean;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -27,7 +30,7 @@ export const newRecoveryCodes = () => post<{ recovery: string[] }>('/api/auth/re
 export function AuthGate({ onReady }: { onReady: () => void }) {
   const [status, setStatus] = useState<AuthStatus>();
   const [down, setDown] = useState<string>();
-  const load = () => authStatus().then((s) => { setStatus(s); setDown(undefined); if (s.loggedIn) onReady(); }).catch((e: Error) => setDown(e.message));
+  const load = () => authStatus().then((s) => { setStatus(s); setDown(undefined); if (s.loggedIn && !s.client) onReady(); }).catch((e: Error) => setDown(e.message));
   useEffect(() => { void load(); }, []);
   if (down) {
     return (
@@ -38,6 +41,7 @@ export function AuthGate({ onReady }: { onReady: () => void }) {
     );
   }
   if (!status) return <div className="boot">Forbinder …</div>;
+  if (status.client) return <ClientGate onReady={onReady} />;
   if (!status.configured) return <Setup onDone={onReady} />;
   return <Login onDone={onReady} unlockOnce={status.unlockOnce} />;
 }

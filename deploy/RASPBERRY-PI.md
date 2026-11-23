@@ -25,6 +25,22 @@ Internettet ──✕── routeren videresender intet · Pi'ens firewall afvis
 
 Brug et wifi med en god adgangskode (WPA2/WPA3), og sæt gerne gæster på routerens gæstenetværk. Så kan de slet ikke se Pi'en.
 
+## Hvor ligger dine data? To måder
+
+| | **Data på din computer** (`FINSTATE_DATA=client`, standard i `finstate.service`) | **Data på Pi'en** (fjern linjen) |
+|---|---|---|
+| Hvad gør Pi'en | Viser kun appen (programkoden). Gemmer **intet** og har intet login. | Viser appen og gemmer data krypteret i `/var/lib/finstate/data`. |
+| Hvor er data | I en mappe på den computer, du åbner siden fra (fx `Dokumenter/Finstate`) – krypteret med `local.key` i mappen. | På Pi'en – låses op med adgangskode + 2FA. |
+| Går data over netværket | **Nej.** Browseren læser og skriver filerne direkte på computeren. Kun appens kode hentes fra Pi'en. | Ja, krypteret med HTTPS mellem browseren og Pi'en på hjemmenetværket. |
+| Flere enheder | Hver computer har sine egne data (flyt med en backup). | Samme data fra Mac og telefon. |
+| Browser | Chrome, Edge eller Brave på en computer kan gemme i en mappe. Safari/Firefox/telefon gemmer i browserens eget lager (ikke krypteret). | Alle browsere. |
+
+Med data på din computer spørger Finstate første gang, **hvilken mappe** dine data skal ligge i. Vælg den samme mappe, som
+`npm start` bruger (`Dokumenter/Finstate`), så har du de samme data, uanset om du åbner Finstate fra Pi'en eller direkte på
+computeren. Mappen huskes; browseren kan bede dig bekræfte adgangen med ét klik, når du åbner siden igen. HTTPS (trin 4) er
+nødvendigt, for browseren giver kun adgang til mapper på sikre sider. Afsnit 3 (flyt data til Pi'en) og 5 (backup fra Pi'en)
+springes over – backup tager du under **Indstillinger → Download backup**.
+
 ## 1. Forbered Pi'en (én gang)
 
 Brug Raspberry Pi OS Lite (64-bit). Giv Pi'en værtsnavnet `finstate`, enten i Raspberry Pi Imager eller med `sudo raspi-config` →
@@ -93,7 +109,7 @@ sudo rsync -a /tmp/finstate/ /opt/finstate/ && sudo chown -R root:root /opt/fins
 cd /opt/finstate && sudo npm ci && sudo npm run build
 ```
 
-## 3. Flyt dine (krypterede) data over
+## 3. Flyt dine (krypterede) data over (kun med data på Pi'en)
 
 Lokalt kører Finstate uden login, men data er krypteret med nøglen i `local.key`. Kopiér hele mappen (også `local.key`) til Pi'en:
 
@@ -134,7 +150,7 @@ og sådan er den lavet med vilje.
 **Åbn aldrig en port i routeren til Pi'en, og brug ikke tjenester som Tailscale Funnel, ngrok eller Cloudflare Tunnel.** De
 gør siden tilgængelig udefra.
 
-## 5. Backup til din Mac
+## 5. Backup til din Mac (kun med data på Pi'en)
 
 Backuppen er en krypteret kopi af hele mappen. Den kan kun åbnes med din adgangskode og 2FA, og den hentes over
 hjemmenetværket.

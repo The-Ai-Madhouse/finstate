@@ -182,3 +182,29 @@ describe('kun hjemmenetværket', () => {
     expect(clientIp(req('8.8.8.8', '192.168.1.7'))).toBe('8.8.8.8');
   });
 });
+
+describe('server: FINSTATE_DATA=client – kun appen, ingen data', () => {
+  it('reports client mode and never stores anything', async () => {
+    const keepData = process.env.FINSTATE_DATA, keepDir = process.env.FINSTATE_DIR;
+    const dir = await mkdtemp(join(tmpdir(), 'finstate-client-'));
+    process.env.FINSTATE_DATA = 'client';
+    process.env.FINSTATE_DIR = join(dir, 'skal-ikke-oprettes');
+    const h = handler('/tmp/finstate-projekt-test');
+    const srv = createServer((req, res) => h(req, res, () => { res.statusCode = 404; res.end(); }));
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+    try {
+      expect(await (await fetch(`${base}/api/auth/status`)).json()).toEqual({ configured: true, loggedIn: true, client: true });
+      expect(await (await fetch(`${base}/api/storage`)).json()).toEqual({ client: true });
+      const put = await fetch(`${base}/api/data`, { method: 'PUT', body: '{"hemmelig":1}' });
+      expect(put.status).toBe(404);
+      expect((await fetch(`${base}/api/backup`)).status).toBe(404);
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      await new Promise<void>((r) => srv.close(() => r()));
+      await rm(dir, { recursive: true, force: true });
+      if (keepData === undefined) delete process.env.FINSTATE_DATA; else process.env.FINSTATE_DATA = keepData;
+      if (keepDir === undefined) delete process.env.FINSTATE_DIR; else process.env.FINSTATE_DIR = keepDir;
+    }
+  });
+});

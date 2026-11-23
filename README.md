@@ -25,6 +25,8 @@ npm test         # tests af regnskabsmotoren
 > **Raspberry Pi:** `npm run build && npm run serve` kører Finstate som selvstændig server. Se
 > [deploy/RASPBERRY-PI.md](deploy/RASPBERRY-PI.md) for sikker opsætning **kun på hjemmenetværket** (HTTPS, firewall, afviser alt udefra),
 > systemd og backup til din computer (`scripts/backup-from-pi.sh`).
+> Med `FINSTATE_DATA=client` (standard i `deploy/finstate.service`) viser Pi'en kun appen, og **dine data bliver på den computer,
+> du åbner siden fra** – i en mappe, du vælger (fx `Dokumenter/Finstate`, krypteret), eller i browseren. Intet data sendes til Pi'en.
 
 > **Dagligt budget – abonnementer & regninger** (i menuen under *Dagligt budget*): adskilt fra financial statementet og
 > uden periode. Finstate finder selv dine faste træk (samme modtager med fast rytme – måned, kvartal, halvår eller år – og

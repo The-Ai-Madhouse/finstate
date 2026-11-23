@@ -5,6 +5,7 @@ import { inPeriod, withAutoBookStart } from '../domain/engine';
 import { VIEW_LABEL, decodeHash, encodeHash, sameRoute, type NavTarget, type Route, type View } from '../domain/nav-target';
 import type { TxFilter } from '../domain/txfilter';
 import type { AppData, Classification } from '../domain/types';
+import { clientBackend, type ClientKind } from './clientStore';
 
 export type { View, NavTarget } from '../domain/nav-target';
 
@@ -80,7 +81,11 @@ export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status:
 const KEY = 'finstate:v1';
 
 /** Hvor gemmes der lige nu? file = krypteret i datafilen (via serveren); error = serveren kunne ikke gemme. */
-export interface SaveStatus { mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string; /** Kører lokalt uden login. */ local?: boolean }
+export interface SaveStatus {
+  mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string; /** Kører lokalt uden login. */ local?: boolean;
+  /** Appen hentes fra en anden maskine (fx en Pi), men data ligger på denne computer: i en mappe eller i browseren. */
+  client?: ClientKind;
+}
 
 let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -103,6 +108,13 @@ let inFlight = false;
 async function putFile(text: string) {
   inFlight = true;
   try {
+    // Data på denne computer: skriv direkte i mappen/browseren – intet sendes til serveren.
+    const client = clientBackend();
+    if (client) {
+      await client.write(text);
+      setStatus({ mode: 'file', savedAt: new Date().toISOString(), error: undefined });
+      return;
+    }
     const r = await fetch('/api/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: text });
     // Gem altid den NYESTE tilstand igen (lastWritten) – aldrig den, der fejlede, hvis der er kommet nyere ændringer.
     if (r.status === 401) { pending = lastWritten ?? text; if (timer) clearTimeout(timer); timer = undefined; lost(); return; }
@@ -113,7 +125,9 @@ async function putFile(text: string) {
     // Prøv igen om lidt – også selvom intet ændres i mellemtiden.
     if (timer) clearTimeout(timer);
     timer = setTimeout(flushSave, 5000);
-    setStatus({ mode: 'error', error: `Kunne ikke gemme (${(e as Error).message}). Kører serveren? Dine ændringer gemmes, så snart den svarer igen.` });
+    setStatus({ mode: 'error', error: clientBackend()
+      ? `Kunne ikke gemme i ${clientBackend()!.label} (${(e as Error).message}). Prøver igen om lidt – luk ikke siden.`
+      : `Kunne ikke gemme (${(e as Error).message}). Kører serveren? Dine ændringer gemmes, så snart den svarer igen.` });
   } finally {
     inFlight = false;
     // Kom der ændringer, mens vi gemte, så gem dem nu (medmindre en genforsøg/debounce allerede venter).
@@ -131,8 +145,13 @@ export function flushSave() {
 // Gem det sidste, når fanen lukkes (sendBeacon overlever, at siden forsvinder – cookien følger med).
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', () => {
+    if (clientBackend()) { flushSave(); return; }
     if (pending !== undefined) navigator.sendBeacon('/api/data', new Blob([pending], { type: 'application/json' }));
     pending = undefined;
+  });
+  // Data på denne computer: advar, hvis siden lukkes, før det sidste er gemt.
+  window.addEventListener('beforeunload', (ev) => {
+    if (clientBackend() && (pending !== undefined || inFlight)) { flushSave(); ev.preventDefault(); }
   });
 }
 
@@ -146,6 +165,16 @@ const dropLegacy = () => { try { localStorage.removeItem(LEGACY_KEY); } catch { 
  */
 const fileStorage: StateStorage = {
   getItem: async () => {
+    const client = clientBackend();
+    if (client) {
+      setStatus({ mode: 'file', dir: client.label, error: undefined, client: client.kind });
+      const text = await client.read();
+      if (text !== null) { lastWritten = undefined; return text; }
+      // Tom mappe: tag de data med, der evt. ligger fra før i browseren.
+      const local = legacyLocal();
+      if (local) { await client.write(local); dropLegacy(); }
+      return local;
+    }
     const info = await fetch('/api/storage', { cache: 'no-store' });
     if (info.status === 401) { lost(); throw new Error('Ikke logget ind'); }
     if (!info.ok) throw new Error((await info.json().catch(() => ({}))).error ?? `HTTP ${info.status}`);
