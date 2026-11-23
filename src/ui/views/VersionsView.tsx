@@ -72,7 +72,7 @@ export function VersionsView() {
       <h1>Versioner</h1>
       <InfoBox label="Hvad er en version?">
         Et øjebliksbillede af alle dine data – fx når balancen går op, eller et financial statement er færdigt. Bagefter kan du se, hvad du har ændret siden,
-        og gå tilbage, hvis noget gik galt. Versionerne ligger som filer i {save.dir}/versions.
+        og gå tilbage, hvis noget gik galt. {save.client === 'browser' ? 'Versionerne ligger i browserens lager på denne computer.' : <>Versionerne ligger som filer i {save.dir}/versions.</>}
       </InfoBox>
       {error && <div className="banner error">{error} <span className="spacer" /><button className="btn sm ghost" onClick={() => setError(undefined)}>Luk</button></div>}
       {flash && <div className="banner info">{flash} <span className="spacer" /><button className="btn sm ghost" onClick={() => setFlash(undefined)}>Luk</button></div>}

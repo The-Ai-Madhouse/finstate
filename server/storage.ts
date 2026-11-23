@@ -1,5 +1,10 @@
 /**
- * Finstates server-del: login med 2FA og krypteret lagring i en mappe på computeren (eller en Raspberry Pi).
+ * Finstates server-del: krypteret lagring i en mappe på computeren (eller en Raspberry Pi) – og login med 2FA, når
+ * Finstate kan nås fra netværket.
+ *
+ *  · Lokalt (npm start / npm run app – kun 127.0.0.1): intet login. Datanøglen ligger i local.key i datamappen (kun din bruger kan læse den).
+ *    Har mappen allerede et login (auth.json, fx en backup fra Pi'en), låses den op én gang med adgangskode + 2FA – derefter aldrig igen.
+ *  · På netværket (npm run serve, fx på en Raspberry Pi): login med adgangskode + 2FA. Slå til/fra med FINSTATE_LOGIN=on|off.
  *
  *  · Mappe: $FINSTATE_DIR eller ~/Documents/Finstate – altid UDEN FOR projektet, så data aldrig kan havne i git.
  *  · finstate.json (data) og versions/*.json er krypteret med AES-256-GCM. Nøglen låses kun op med adgangskode + 2FA
@@ -16,7 +21,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import QRCode from 'qrcode';
 import type { Plugin } from 'vite';
 import { Auth, AuthError, SESSION_DAYS } from './auth.ts';
-import { open, otpauthUri, seal } from './crypto.ts';
+import { newDataKey, open, otpauthUri, seal } from './crypto.ts';
 
 const MAX_BODY = 200 * 1024 * 1024;
 const COOKIE = 'finstate_session';
@@ -127,12 +132,52 @@ async function encryptExisting(dir: string, dek: Buffer) {
 
 const safeId = (id: string) => /^[a-z0-9-]{1,80}$/.test(id);
 
-export function handler(root: string) {
+const KEY_FILE = 'local.key';
+
+/** Datanøglen til lokal brug (uden login) – eller undefined, hvis mappen har et login, der først skal låses op én gang. */
+async function localKey(dir: string, auth: Auth): Promise<Buffer | undefined> {
+  const f = join(dir, KEY_FILE);
+  if (await exists(f)) return Buffer.from((await readFile(f, 'utf8')).trim(), 'base64');
+  if (await auth.configured()) return undefined;
+  const dek = newDataKey();
+  await writeAtomic(f, dek.toString('base64'));
+  await encryptExisting(dir, dek);
+  return dek;
+}
+const saveLocalKey = (dir: string, dek: Buffer) => writeAtomic(join(dir, KEY_FILE), dek.toString('base64'));
+
+export interface HandlerOptions {
+  /**
+   * Kræv login med adgangskode + 2FA. Uden: intet login – men kun for forespørgsler til 127.0.0.1/localhost
+   * (et navn fra FINSTATE_ALLOWED_HOSTS kræver altid login).
+   */
+  requireLogin?: boolean;
+}
+
+/**
+ * FINSTATE_DATA=client: serveren viser kun appen. Data ligger på den computer, man åbner siden fra (en mappe, man vælger
+ * i browseren – eller browserens eget lager), så serveren har hverken data, nøgler eller login.
+ */
+export const dataOnClient = () => (process.env.FINSTATE_DATA ?? '').trim().toLowerCase() === 'client';
+
+/** FINSTATE_LOGIN=on|off overstyrer standarden. */
+export function loginRequired(fallback: boolean): boolean {
+  const v = (process.env.FINSTATE_LOGIN ?? '').trim().toLowerCase();
+  return v === 'on' || v === '1' || v === 'true' ? true : v === 'off' || v === '0' || v === 'false' ? false : fallback;
+}
+
+export function handler(root: string, opts: HandlerOptions = {}) {
+  const requireLogin = opts.requireLogin ?? true;
   const auths = new Map<string, Auth>();
   return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     if (!url.pathname.startsWith('/api/')) return next();
     if (!allowed(req)) return send(res, 403, { error: 'Kun Finstate selv har adgang.' });
+    if (dataOnClient()) {
+      if (url.pathname === '/api/auth/status') return send(res, 200, { configured: true, loggedIn: true, client: true });
+      if (url.pathname === '/api/storage') return send(res, 200, { client: true });
+      return send(res, 404, { error: 'Dine data ligger på din egen computer – ikke på serveren.' });
+    }
     let dir: string;
     try { dir = storageDir(root); } catch (e) { return send(res, 500, { error: (e as Error).message }); }
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -141,12 +186,30 @@ export function handler(root: string) {
     const vdir = join(dir, 'versions');
     const ticket = cookie(req, COOKIE);
     const json = async <T,>() => JSON.parse(await readBody(req)) as T;
+    // Lokalt uden login: kun når login ikke kræves OG siden er åbnet som 127.0.0.1/localhost.
+    const local = !requireLogin && isLocal(req.headers.host);
     try {
+      // ---------------- Lokalt: intet login (en mappe med et eksisterende login låses op én gang)
+      if (local && url.pathname === '/api/auth/status' && req.method === 'GET') {
+        const key = await localKey(dir, auth);
+        return send(res, 200, { configured: true, loggedIn: !!key, local: true, unlockOnce: !key });
+      }
+      if (local && url.pathname === '/api/auth/login' && req.method === 'POST') {
+        const { password, code } = await json<{ password: string; code: string }>();
+        const r = await auth.login(String(password ?? ''), String(code ?? ''), label(req));
+        await saveLocalKey(dir, r.dek);
+        return send(res, 200, { ok: true, local: true });
+      }
+      if (local && url.pathname.startsWith('/api/auth/') && url.pathname !== '/api/auth/recovery') return send(res, 400, { error: 'Finstate kører lokalt uden login.' });
+
       // ---------------- Login (åbent – men begrænset af spærring efter forkerte forsøg)
       if (url.pathname === '/api/auth/status' && req.method === 'GET') return send(res, 200, await auth.status(ticket));
       if (url.pathname === '/api/auth/setup/start' && req.method === 'POST') {
         const { password } = await json<{ password: string }>();
-        const { setupTicket, secret } = await auth.setupStart(String(password ?? ''));
+        // Data fra lokal brug er krypteret med local.key – det nye login skal låse samme nøgle op.
+        const keyFile = join(dir, KEY_FILE);
+        const existing = await exists(keyFile) ? Buffer.from((await readFile(keyFile, 'utf8')).trim(), 'base64') : undefined;
+        const { setupTicket, secret } = await auth.setupStart(String(password ?? ''), existing);
         const uri = otpauthUri(secret);
         return send(res, 200, { setupTicket, secret, qr: await QRCode.toDataURL(uri, { margin: 1, width: 220 }) });
       }
@@ -154,6 +217,8 @@ export function handler(root: string) {
         const { setupTicket, code } = await json<{ setupTicket: string; code: string }>();
         const r = await auth.setupFinish(String(setupTicket ?? ''), String(code ?? ''), label(req));
         await encryptExisting(dir, r.dek);
+        // Med login ligger nøglen ikke længere ukrypteret i mappen.
+        await rm(join(dir, KEY_FILE), { force: true });
         return send(res, 200, { recovery: r.recovery, expiresAt: r.expiresAt }, { 'Set-Cookie': sessionCookie(req, r.ticket, SESSION_DAYS * 86400) });
       }
       if (url.pathname === '/api/auth/login' && req.method === 'POST') {
@@ -167,16 +232,19 @@ export function handler(root: string) {
         return send(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(req, '', 0) });
       }
 
-      // ---------------- Alt herunder kræver login – og datanøglen fra login'et
-      const unlocked = await auth.unlock(ticket);
-      if (!unlocked) return send(res, 401, { error: 'Log ind for at fortsætte.', configured: await auth.configured() });
+      // ---------------- Alt herunder kræver login (eller lokal brug) – og datanøglen
+      const unlocked = local ? await localKey(dir, auth).then((dek) => (dek ? { dek } : undefined)) : await auth.unlock(ticket);
+      if (!unlocked) return send(res, 401, { error: local ? 'Lås dine data op én gang for at fortsætte.' : 'Log ind for at fortsætte.', configured: await auth.configured() });
       const { dek } = unlocked;
 
-      if (url.pathname === '/api/auth/recovery' && req.method === 'POST') return send(res, 200, { recovery: await auth.newRecovery() });
+      if (url.pathname === '/api/auth/recovery' && req.method === 'POST') {
+        if (local) return send(res, 400, { error: 'Finstate kører lokalt uden login.' });
+        return send(res, 200, { recovery: await auth.newRecovery() });
+      }
       if (url.pathname === '/api/storage' && req.method === 'GET') {
         const has = await exists(dataFile);
         const st = has ? await stat(dataFile) : undefined;
-        return send(res, 200, { dir: pretty(dir), exists: has, savedAt: st?.mtime.toISOString(), encrypted: true });
+        return send(res, 200, { dir: pretty(dir), exists: has, savedAt: st?.mtime.toISOString(), encrypted: true, local });
       }
       if (url.pathname === '/api/data') {
         if (req.method === 'GET') {
@@ -227,9 +295,10 @@ export function handler(root: string) {
         }
       }
       // Krypteret backup: hele mappen (data, versioner og login – uden aktive logins) i én fil.
-      // Kan pakkes ud med scripts/unpack-backup.mjs og åbnes med samme adgangskode + 2FA.
+      // Kan pakkes ud med scripts/unpack-backup.mjs og åbnes med samme adgangskode + 2FA – eller lokalt med local.key.
       if (url.pathname === '/api/backup' && req.method === 'GET') {
         const files: Record<string, string> = {};
+        if (local && await exists(join(dir, KEY_FILE))) files[KEY_FILE] = await readFile(join(dir, KEY_FILE), 'utf8');
         const authFile = await auth.load();
         if (authFile) files['auth.json'] = JSON.stringify({ ...authFile, sessions: [], failures: undefined }, null, 2);
         if (await exists(dataFile)) files['finstate.json'] = await readFile(dataFile, 'utf8');
@@ -246,12 +315,14 @@ export function handler(root: string) {
   };
 }
 
+/** npm start / npm run app: kører kun på din egen computer (127.0.0.1) – intet login, medmindre FINSTATE_LOGIN=on. */
 export function finstateStorage(): Plugin {
   let root = process.cwd();
+  const opts = (): HandlerOptions => ({ requireLogin: loginRequired(false) });
   return {
     name: 'finstate-storage',
     configResolved(c) { root = c.root; },
-    configureServer(server) { server.middlewares.use(handler(root)); },
-    configurePreviewServer(server) { server.middlewares.use(handler(root)); },
+    configureServer(server) { server.middlewares.use(handler(root, opts())); },
+    configurePreviewServer(server) { server.middlewares.use(handler(root, opts())); },
   };
 }

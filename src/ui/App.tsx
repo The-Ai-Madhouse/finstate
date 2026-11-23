@@ -1,3 +1,5 @@
+import { GoalsView } from './views/GoalsView';
+import { UndoLayer } from './components/Undo';
 import { StatementSwitcher } from './components/PeriodPrompt';
 import { NEEDS_REVIEW } from '../domain/classify';
 import { inPeriod } from '../domain/engine';
@@ -14,6 +16,7 @@ import { SlidesView } from './views/SlidesView';
 import { StatementView } from './views/StatementView';
 import { TransfersView } from './views/TransfersView';
 import { VersionsView } from './views/VersionsView';
+import { BudgetView } from './views/BudgetView';
 import { PairDialog } from './components/PairDialog';
 import { NavCallout, useNavFocus } from './components/NavFocus';
 
@@ -32,6 +35,8 @@ const RESULTS: { id: View; label: string; icon: string }[] = [
 
 export function App() {
   const saveMode = useStore((s) => s.saveStatus.mode);
+  const localMode = useStore((s) => s.saveStatus.local);
+  const clientMode = useStore((s) => s.saveStatus.client);
   const view = useStore((s) => s.view);
   const engine = useEngine();
   const period = usePeriod();
@@ -52,10 +57,15 @@ export function App() {
     <div className="app">
       <PairDialog />
       <NavCallout />
+      <UndoLayer />
       <nav className="nav" aria-label="Hovedmenu">
-        <div className="brand">◐ Finstate <small>lokalt & privat</small></div>
+        <div className="brand"><span className="brand-mark" aria-hidden>◐</span>Finstate <small>lokalt & privat</small></div>
         <StatementSwitcher />
         <NavItem id="overview" label="Overblik" icon={<span className="step">⌂</span>} />
+
+        <div className="nav-label">Dagligt budget</div>
+        <NavItem id="budget" label="Abonnementer" icon={<span className="step bud-ic">◷</span>} />
+        <NavItem id="goals" label="Mål" icon={<span className="step goal-ic">★</span>} />
 
         <div className="nav-label">Arbejdsgang</div>
         {WORK.map((w) => {
@@ -80,14 +90,14 @@ export function App() {
           <NavItem id="settings" label="Indstillinger" icon={<span className="step">⚙</span>} />
         </div>
         <div className="nav-foot">
-          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : 'Krypteret og kræver login med 2FA.'}
+          Data forlader aldrig din computer. {saveMode === 'error' ? 'Kunne ikke gemme – kører serveren?' : clientMode === 'folder' ? 'Gemt krypteret i en mappe på denne computer.' : clientMode === 'browser' ? 'Gemt i browseren på denne computer.' : localMode ? 'Krypteret og kører kun på din computer.' : 'Krypteret og kræver login med 2FA.'}
           <div className="nav-version" title={VERSION_DETAILS}>{VERSION_LABEL}</div>
         </div>
       </nav>
       <div className="main">
         <TopBar />
-        <div className="content">
-          {view !== 'overview' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
+        <div className="content" data-view={view} key={view}>
+          {view !== 'overview' && view !== 'budget' && view !== 'goals' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
           {view === 'overview' && <OverviewView />}
           {view === 'import' && <ImportView />}
           {view === 'ledger' && <LedgerView />}
@@ -97,6 +107,8 @@ export function App() {
           {view === 'slides' && <SlidesView />}
           {view === 'settings' && <SettingsView />}
           {view === 'versions' && <VersionsView />}
+          {view === 'budget' && <BudgetView />}
+          {view === 'goals' && <GoalsView />}
         </div>
       </div>
     </div>
@@ -117,6 +129,7 @@ function NavItem({ id, label, icon, extra, title, disabled }: { id: View; label:
 }
 
 function TopBar() {
+  const view = useStore((s) => s.view);
   const storageError = useStore((s) => s.storageError);
   const save = useStore((s) => s.saveStatus);
   const setView = useStore((s) => s.setView);
@@ -124,11 +137,18 @@ function TopBar() {
   return (
     <>
       <div className="topbar">
-        {period
+        {view === 'budget'
+          ? <span className="crumb">Dagligt budget · <b>Abonnementer & regninger</b> <span className="muted">(adskilt fra financial statementet)</span></span>
+          : view === 'goals'
+          ? <span className="crumb">Dagligt budget · <b>Mål</b> <span className="muted">(planlægning – flytter ingen penge)</span></span>
+          : period
           ? <span className="crumb">Financial statement · <b>{period.name}</b> <span className="muted">({period.start} – {period.end})</span></span>
           : <span className="crumb muted">Intet financial statement valgt</span>}
         <span className="spacer" />
-        {save.mode === 'file'
+        {save.mode === 'file' && save.client
+          ? <span className="chip user" title={`${save.client === 'folder' ? `Krypteret (AES-256) i mappen ${save.dir} på denne computer` : 'I browserens lager på denne computer (ikke krypteret)'}${save.savedAt ? ` · senest gemt ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>
+              {save.client === 'folder' ? `🔒 Gemt i ${save.dir}` : '💾 Gemt i browseren'}</span>
+          : save.mode === 'file'
           ? <span className="chip user" title={`Krypteret (AES-256) i ${save.dir}/finstate.json${save.savedAt ? ` · senest gemt ${new Date(save.savedAt).toLocaleString('da-DK')}` : ''}`}>🔒 Krypteret og gemt</span>
           : save.mode === 'error' ? <span className="chip review" title={save.error}>⚠ Ikke gemt</span> : null}
         <button className="btn sm" onClick={() => setView('versions')} title="Gem en version (milepæl), se ændringer siden – og gå tilbage">🕘 Versioner</button>

@@ -572,6 +572,32 @@ describe('filtre i Kategorisér', () => {
     expect(f({ withNote: true }).map((t) => t.text)).toEqual(['MobilePay Jonas Lind']);
     const desc = f({ sort: 'amount-desc' });
     expect(Math.abs(desc[0].amount)).toBeGreaterThanOrEqual(Math.abs(desc[desc.length - 1].amount));
+    // Beløb som i et regneark: større end, mindre end, lig med (uden fortegn).
+    expect(f({ amountOp: 'gt', min: '8.450' }).every((t) => Math.abs(t.amount) > 845000)).toBe(true);
+    expect(f({ amountOp: 'lt', max: '100' }).every((t) => Math.abs(t.amount) < 10000)).toBe(true);
+    const eq = f({ amountOp: 'eq', min: '8450' });
+    expect(eq.length).toBeGreaterThan(0);
+    expect(eq.every((t) => Math.abs(t.amount) === 845000)).toBe(true);
+    // Retning: kun penge ind eller ud – og sortering med fortegn.
+    expect(f({ amountSign: 'out' }).every((t) => t.amount < 0)).toBe(true);
+    expect(f({ amountSign: 'in' }).every((t) => t.amount > 0)).toBe(true);
+    expect(f({ amountSign: 'out' }).length + f({ amountSign: 'in' }).length).toBe(d.txs.filter((t) => t.amount !== 0).length);
+    expect(f({ amountSign: 'out', amountOp: 'gt', min: '5000' }).every((t) => t.amount < -500000)).toBe(true);
+    const signed = f({ sort: 'signed-asc' }).map((t) => t.amount);
+    expect(signed).toEqual([...signed].sort((a, b) => a - b));
+    expect(f({ sort: 'signed-desc' })[0].amount).toBe(Math.max(...d.txs.map((t) => t.amount)));
+    // Flervalg: flere typer, kategorier og statusser på én gang.
+    const both = f({ types: ['income', 'internal'] });
+    expect(both.length).toBe(f({ type: 'income' }).length + f({ type: 'internal' }).length - f({ type: 'income' }).filter((t) => f({ type: 'internal' }).includes(t)).length);
+    expect(f({ types: ['expense'] }).length).toBe(f({ type: 'expense' }).length);
+    const two = f({ categoryIds: ['ex-bolig', 'ex-transport'] });
+    expect(two.length).toBeGreaterThan(f({ categoryId: 'ex-bolig' }).length);
+    expect(f({ statuses: ['pending', 'done'] }).length).toBe(d.txs.length);
+    expect(f({ accountIds: ['acc-loen', 'acc-ops'] }).length).toBe(d.txs.filter((t) => t.accountId === 'acc-loen' || t.accountId === 'acc-ops').length);
+    // Tekst A–Å og Å–A.
+    const az = f({ sort: 'text-asc' }).map((t) => t.text);
+    expect(az).toEqual([...az].sort((a, b) => a.localeCompare(b, 'da', { sensitivity: 'base', numeric: true })));
+    expect(f({ sort: 'text-desc' })[0].text).toBe(az[az.length - 1]);
   });
 });
 

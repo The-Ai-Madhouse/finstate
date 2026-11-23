@@ -12,6 +12,9 @@ WorkingDirectory=/opt/finstate
 Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=5173
+# Data på din egen computer: Pi'en viser kun appen og gemmer intet (se deploy/RASPBERRY-PI.md).
+# Fjern linjen, hvis data i stedet skal ligge krypteret på Pi'en (med login + 2FA).
+Environment=FINSTATE_DATA=client
 Environment=FINSTATE_DIR=/var/lib/finstate/data
 # Navnet, du åbner siden med (Pi'ens navn på hjemmenetværket):
 Environment=FINSTATE_ALLOWED_HOSTS=finstate.local

@@ -1,19 +1,21 @@
 import { NoPeriod } from '../components/PeriodPrompt';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { NEEDS_REVIEW, clsOfLine, type Resolved } from '../../domain/classify';
 import { inPeriod } from '../../domain/engine';
 import { dateShort, kr } from '../../domain/format';
 import { normalizeText } from '../../domain/normalize';
 import type { Classification, Tx } from '../../domain/types';
-import { useStore, type LedgerFilter } from '../../store/store';
-import { activeFilterCount, filterTxs } from '../../domain/txfilter';
+import { useStore } from '../../store/store';
+import { accountsOf, activeFilterCount, filterTxs } from '../../domain/txfilter';
 import { ChronoReview, focusTxField } from './ChronoReview';
+import { LedgerFilterBar } from './LedgerFilterBar';
+import { TradeLine } from '../components/TradeLine';
 import { useFocusIntent } from '../components/NavFocus';
 import { SplitDialog } from '../components/SplitDialog';
 import { addDays } from '../../domain/util';
 import { defaultCategories } from '../../domain/defaults';
 import { saveRule, setManual, useEngine, usePeriod } from '../../store/actions';
-import { AccountSelect, CategoryCombo, internalTargetName, LinkPickBanner, linkTargetProps, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
+import { internalTargetName, linkTargetProps, ClassEditor, TYPE_KEYS, TxNotes, isComplete, withTypeKey, Empty, Money, SourceChip, categoryLabel, InfoBox } from '../components/common';
 
 const clsOf = (r: Resolved): Classification => clsOfLine(r.lines[0]);
 
@@ -37,7 +39,9 @@ function LedgerInner() {
   // Kun transaktioner i det valgte financial statement.
   const periodTxs = useMemo(() => data.txs.filter((t) => t.date > data.settings.bookStart && inPeriod(t, period)), [data, period]);
   // Omfang = periode + konto. Det bestemmer fremskridt og fejring – de øvrige filtre ændrer kun, hvad man ser.
-  const scope = useMemo(() => periodTxs.filter((t) => !filter.accountId || t.accountId === filter.accountId), [periodTxs, filter.accountId]);
+  const accs = accountsOf(filter);
+  const accKey = accs.join(',');
+  const scope = useMemo(() => periodTxs.filter((t) => !accs.length || accs.includes(t.accountId)), [periodTxs, accKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const txs = useMemo(() => filterTxs(periodTxs, e.resolved, data.categories, filter), [periodTxs, e.resolved, data.categories, filter]);
 
   // Linket hertil (en transaktion, "mangler afgørelse", "uden kategori"): vis det i gennemgangen.
@@ -67,7 +71,7 @@ function LedgerInner() {
   return (
     <div className="stack">
       <h1>Kategorisér</h1>
-      <FilterBar total={periodTxs.length} shown={txs.length} />
+      <LedgerFilterBar total={periodTxs.length} shown={txs.length} />
       {!data.categories.length && (
         <div className="banner warn">
           <span className="grow">Du har ingen kategorier endnu. Indsæt et eksempeltræ (kan rettes bagefter) – eller opret dine egne undervejs med "+ Ny kategori…" i kategorivalget.</span>
@@ -89,67 +93,7 @@ function LedgerInner() {
       </div>
       {!periodTxs.length && data.txs.length > 0 ? (
         <EmptyPeriod />
-      ) : tab === 'chrono' ? <ChronoReview key={`${period.id}|${filter.accountId ?? 'alle'}`} txs={txs} scope={scope} searching={nActive > (filter.accountId ? 1 : 0)} /> : tab === 'review' ? <ReviewGroups txs={review} /> : <TxTable txs={txs} />}
-    </div>
-  );
-}
-
-/** Filtre og sortering – altid synlige øverst, så man kan søge lidt og hurtigt komme tilbage. */
-function FilterBar({ total, shown }: { total: number; shown: number }) {
-  const f = useStore((s) => s.ledgerFilter);
-  const set = useStore((s) => s.setLedgerFilter);
-  const reset = useStore((s) => s.resetLedgerFilter);
-  const [more, setMore] = useState(() => !!(f.from || f.to || f.min || f.max || f.withNote));
-  const ref = useRef<HTMLDivElement>(null);
-  const n = activeFilterCount(f);
-  // Gennemgangens statuslinje skal klæbe under filterlinjen.
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--filter-h', `${el.offsetHeight}px`));
-    ro.observe(el);
-    return () => { ro.disconnect(); document.documentElement.style.setProperty('--filter-h', '0px'); };
-  }, []);
-  const seg = <K extends 'type' | 'status'>(key: K, opts: [LedgerFilter[K], string][]) => (
-    <div className="seg" role="radiogroup">
-      {opts.map(([v, l]) => <button key={v} className={f[key] === v ? 'on plain' : ''} role="radio" aria-checked={f[key] === v} onClick={() => set({ [key]: v } as Partial<LedgerFilter>)}>{l}</button>)}
-    </div>
-  );
-  return (
-    <div className="filter-bar" ref={ref}>
-      <LinkPickBanner />
-      <div className="row">
-        <div className="search-wrap grow">
-          <input className="search-input" placeholder="Søg i tekst, noter, kommentarer, bankkategori eller beløb (fx 1.234,50)…" value={f.q}
-            onChange={(ev) => set({ q: ev.target.value })} onKeyDown={(ev) => ev.key === 'Escape' && set({ q: '' })} aria-label="Søg" />
-          {f.q && <button className="search-clear" onClick={() => set({ q: '' })} aria-label="Ryd søgning">✕</button>}
-        </div>
-        <AccountSelect className="sm" value={f.accountId} onChange={(accountId) => set({ accountId })} placeholder="Alle konti" filter={(a) => a.kind === 'bank'} />
-        <CategoryCombo className="sm" value={f.categoryId} onChange={(categoryId) => set({ categoryId })} allowClear="Alle kategorier" ariaLabel="Filtrér på kategori" />
-        <select className="sm" value={f.sort} onChange={(ev) => set({ sort: ev.target.value as LedgerFilter['sort'] })} aria-label="Sortér">
-          <option value="date-asc">Dato, ældst først</option>
-          <option value="date-desc">Dato, nyest først</option>
-          <option value="amount-desc">Beløb, største først</option>
-          <option value="amount-asc">Beløb, mindste først</option>
-        </select>
-      </div>
-      <div className="row small">
-        {seg('type', [['all', 'Alle typer'], ['income', 'Indtægt'], ['expense', 'Udgift'], ['internal', 'Intern']])}
-        {seg('status', [['all', 'Alle'], ['pending', 'Mangler afgørelse'], ['uncat', 'Uden kategori'], ['done', 'Afgjort']])}
-        <button className={`btn sm ghost ${more ? 'on' : ''}`} onClick={() => setMore(!more)}>{more ? 'Færre filtre ▴' : 'Dato, beløb, kommentar ▾'}</button>
-        <span className="spacer" />
-        <span className="muted">Viser {shown} af {total}</span>
-        {n > 0 && <button className="btn sm ghost" onClick={reset}>Nulstil filtre ({n})</button>}
-      </div>
-      {more && (
-        <div className="row small">
-          <label className="row" style={{ gap: 4 }}>Fra <input type="date" className="sm" value={f.from ?? ''} onChange={(ev) => set({ from: ev.target.value || undefined })} /></label>
-          <label className="row" style={{ gap: 4 }}>Til <input type="date" className="sm" value={f.to ?? ''} onChange={(ev) => set({ to: ev.target.value || undefined })} /></label>
-          <label className="row" style={{ gap: 4 }}>Beløb fra <input className="sm num" style={{ width: 100 }} inputMode="decimal" placeholder="0" value={f.min ?? ''} onChange={(ev) => set({ min: ev.target.value })} /></label>
-          <label className="row" style={{ gap: 4 }}>til <input className="sm num" style={{ width: 100 }} inputMode="decimal" placeholder="∞" value={f.max ?? ''} onChange={(ev) => set({ max: ev.target.value })} /> kr</label>
-          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={f.withNote} onChange={(ev) => set({ withNote: ev.target.checked })} /> Kun med kommentar/note</label>
-        </div>
-      )}
+      ) : tab === 'chrono' ? <ChronoReview key={`${period.id}|${accKey || 'alle'}`} txs={txs} scope={scope} searching={nActive > (accs.length ? 1 : 0)} /> : tab === 'review' ? <ReviewGroups txs={review} /> : <TxTable txs={txs} />}
     </div>
   );
 }
@@ -304,6 +248,7 @@ function TxTable({ txs }: { txs: Tx[] }) {
                   <td style={{ maxWidth: 320 }}>
                     <div className="ellipsis" title={t.text}>{t.text}</div>
                     <TxNotes tx={t} />
+                    {t.trade && <TradeLine tx={t} split />}
                     {t.bankCategory && <div className="small muted ellipsis">{t.bankCategory}{t.bankSubcategory ? ` › ${t.bankSubcategory}` : ''}</div>}
                   </td>
                   <td className="num"><Money v={t.amount} decimals colored /></td>

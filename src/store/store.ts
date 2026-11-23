@@ -4,7 +4,8 @@ import { emptyData } from '../domain/defaults';
 import { inPeriod, withAutoBookStart } from '../domain/engine';
 import { VIEW_LABEL, decodeHash, encodeHash, sameRoute, type NavTarget, type Route, type View } from '../domain/nav-target';
 import type { TxFilter } from '../domain/txfilter';
-import type { AppData } from '../domain/types';
+import type { AppData, Classification } from '../domain/types';
+import { clientBackend, type ClientKind } from './clientStore';
 
 export type { View, NavTarget } from '../domain/nav-target';
 
@@ -37,6 +38,11 @@ interface State {
   resetLedgerFilter: () => void;
   update: (recipe: (d: AppData) => AppData) => void;
   replaceAll: (d: AppData) => void;
+  /** Fortryd/gentag (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) – kun i denne session. */
+  undoStack: UndoEntry[];
+  redoStack: UndoEntry[];
+  undo: () => UndoEntry | undefined;
+  redo: () => UndoEntry | undefined;
   markExported: () => void;
   /** Gå til en side (en ny post i browserens historik, så Tilbage virker). */
   setView: (v: View, settingsTab?: string) => void;
@@ -51,8 +57,8 @@ interface State {
   linkPick?: LinkPick;
   setLinkPick: (pick?: LinkPick) => void;
   /** Valgt par, der venter på at blive bekræftet (og evt. hvor resten skal hen). */
-  pairDraft?: { pick: LinkPick; otherId: string };
-  setPairDraft: (draft?: { pick: LinkPick; otherId: string }) => void;
+  pairDraft?: { pick: LinkPick; otherIds: string[] };
+  setPairDraft: (draft?: { pick: LinkPick; otherIds: string[] }) => void;
   /** Skift financial statement. replace: automatisk skift (fx efter sletning) – ingen ny post i historikken. */
   setPeriod: (id?: string, opts?: { replace?: boolean }) => void;
 }
@@ -61,7 +67,13 @@ interface State {
  * Vælg en anden transaktion (søg eller klik i listen):
  *  plain = almindelige transaktioner (fx udlæg og indbetaling) · post = par på en afstemt post (fx udlæg ↔ tilbagebetaling) · bank = find modposten til en overførsel mellem dine konti
  */
-export type LinkPick = { txId: string; mode: 'plain' | 'post' | 'bank'; postId?: string; periodId?: string };
+export type LinkPick = {
+  txId: string; mode: 'plain' | 'post' | 'bank'; postId?: string; periodId?: string;
+  /** De valgte (klik for at vælge/fravælge, Enter for at parre). En overførsel mellem dine konti har kun én modpost. */
+  others?: string[];
+  /** Det, man allerede har valgt i parringsvinduet (fx Intern → en post) – huskes, når man går tilbage og vælger videre. */
+  cls?: Classification;
+};
 
 export type LedgerFilter = TxFilter;
 export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status: 'all', withNote: false, sort: 'date-asc' };
@@ -69,7 +81,11 @@ export const DEFAULT_LEDGER_FILTER: LedgerFilter = { q: '', type: 'all', status:
 const KEY = 'finstate:v1';
 
 /** Hvor gemmes der lige nu? file = krypteret i datafilen (via serveren); error = serveren kunne ikke gemme. */
-export interface SaveStatus { mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string }
+export interface SaveStatus {
+  mode: 'loading' | 'file' | 'error'; dir?: string; savedAt?: string; error?: string; /** Kører lokalt uden login. */ local?: boolean;
+  /** Appen hentes fra en anden maskine (fx en Pi), men data ligger på denne computer: i en mappe eller i browseren. */
+  client?: ClientKind;
+}
 
 let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -92,6 +108,13 @@ let inFlight = false;
 async function putFile(text: string) {
   inFlight = true;
   try {
+    // Data på denne computer: skriv direkte i mappen/browseren – intet sendes til serveren.
+    const client = clientBackend();
+    if (client) {
+      await client.write(text);
+      setStatus({ mode: 'file', savedAt: new Date().toISOString(), error: undefined });
+      return;
+    }
     const r = await fetch('/api/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: text });
     // Gem altid den NYESTE tilstand igen (lastWritten) – aldrig den, der fejlede, hvis der er kommet nyere ændringer.
     if (r.status === 401) { pending = lastWritten ?? text; if (timer) clearTimeout(timer); timer = undefined; lost(); return; }
@@ -102,7 +125,9 @@ async function putFile(text: string) {
     // Prøv igen om lidt – også selvom intet ændres i mellemtiden.
     if (timer) clearTimeout(timer);
     timer = setTimeout(flushSave, 5000);
-    setStatus({ mode: 'error', error: `Kunne ikke gemme (${(e as Error).message}). Kører serveren? Dine ændringer gemmes, så snart den svarer igen.` });
+    setStatus({ mode: 'error', error: clientBackend()
+      ? `Kunne ikke gemme i ${clientBackend()!.label} (${(e as Error).message}). Prøver igen om lidt – luk ikke siden.`
+      : `Kunne ikke gemme (${(e as Error).message}). Kører serveren? Dine ændringer gemmes, så snart den svarer igen.` });
   } finally {
     inFlight = false;
     // Kom der ændringer, mens vi gemte, så gem dem nu (medmindre en genforsøg/debounce allerede venter).
@@ -120,8 +145,13 @@ export function flushSave() {
 // Gem det sidste, når fanen lukkes (sendBeacon overlever, at siden forsvinder – cookien følger med).
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', () => {
+    if (clientBackend()) { flushSave(); return; }
     if (pending !== undefined) navigator.sendBeacon('/api/data', new Blob([pending], { type: 'application/json' }));
     pending = undefined;
+  });
+  // Data på denne computer: advar, hvis siden lukkes, før det sidste er gemt.
+  window.addEventListener('beforeunload', (ev) => {
+    if (clientBackend() && (pending !== undefined || inFlight)) { flushSave(); ev.preventDefault(); }
   });
 }
 
@@ -135,11 +165,21 @@ const dropLegacy = () => { try { localStorage.removeItem(LEGACY_KEY); } catch { 
  */
 const fileStorage: StateStorage = {
   getItem: async () => {
+    const client = clientBackend();
+    if (client) {
+      setStatus({ mode: 'file', dir: client.label, error: undefined, client: client.kind });
+      const text = await client.read();
+      if (text !== null) { lastWritten = undefined; return text; }
+      // Tom mappe: tag de data med, der evt. ligger fra før i browseren.
+      const local = legacyLocal();
+      if (local) { await client.write(local); dropLegacy(); }
+      return local;
+    }
     const info = await fetch('/api/storage', { cache: 'no-store' });
     if (info.status === 401) { lost(); throw new Error('Ikke logget ind'); }
     if (!info.ok) throw new Error((await info.json().catch(() => ({}))).error ?? `HTTP ${info.status}`);
-    const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string };
-    setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined });
+    const meta = (await info.json()) as { dir: string; exists: boolean; savedAt?: string; local?: boolean };
+    setStatus({ mode: 'file', dir: meta.dir, savedAt: meta.savedAt, error: undefined, local: !!meta.local });
     const local = legacyLocal();
     if (meta.exists) {
       const r = await fetch('/api/data', { cache: 'no-store' });
@@ -166,6 +206,17 @@ const fileStorage: StateStorage = {
   removeItem: () => {},
 };
 
+/** En tilstand, man kan fortryde tilbage til – og hvor man stod (så man kan føres derhen igen). */
+export interface UndoEntry { data: AppData; focusTx?: string; view?: View }
+const UNDO_MAX = 100;
+const stamp = (d: AppData): AppData => ({ ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } });
+/** Husk den nuværende tilstand før en ændring. Data er uforanderlige, så det koster kun en reference. */
+function pushUndo(s: { data: AppData; undoStack: UndoEntry[]; view: View }): Pick<State, 'undoStack' | 'redoStack'> {
+  const row = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-txrow],[data-ledgerrow]') : null;
+  const focusTx = row?.dataset.txrow ?? row?.dataset.ledgerrow;
+  return { undoStack: [...s.undoStack.slice(-(UNDO_MAX - 1)), { data: s.data, focusTx, view: s.view }], redoStack: [] };
+}
+
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
@@ -177,12 +228,30 @@ export const useStore = create<State>()(
       resetLedgerFilter: () => set((s) => ({ ledgerFilter: { ...DEFAULT_LEDGER_FILTER, sort: s.ledgerFilter.sort } })),
       update: (recipe) =>
         set((s) => {
-          const d = withAutoBookStart(recipe(s.data));
-          return { data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } } };
+          const r = recipe(s.data);
+          if (r === s.data) return {};
+          const d = withAutoBookStart(r);
+          return { data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } }, ...pushUndo(s) };
         }),
       replaceAll: (raw) => {
         const d = withAutoBookStart(raw);
-        set({ data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } } });
+        set((s) => ({ data: { ...d, settings: { ...d.settings, lastChangeAt: new Date().toISOString() } }, ...pushUndo(s) }));
+      },
+      undoStack: [],
+      redoStack: [],
+      undo: () => {
+        const s = get();
+        const prev = s.undoStack[s.undoStack.length - 1];
+        if (!prev) return undefined;
+        set({ data: stamp(prev.data), undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, { data: s.data, focusTx: prev.focusTx, view: prev.view }] });
+        return prev;
+      },
+      redo: () => {
+        const s = get();
+        const next = s.redoStack[s.redoStack.length - 1];
+        if (!next) return undefined;
+        set({ data: stamp(next.data), redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, { data: s.data, focusTx: next.focusTx, view: next.view }] });
+        return next;
       },
       markExported: () => set((s) => ({ data: { ...s.data, settings: { ...s.data.settings, lastExportAt: new Date().toISOString() } } })),
       setNavNotice: (navNotice) => set({ navNotice }),

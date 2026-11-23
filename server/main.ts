@@ -7,6 +7,8 @@
  *   FINSTATE_DIR            datamappe (standard ~/Documents/Finstate)
  *   PORT / HOST             standard 5173 / 127.0.0.1 – lyt KUN lokalt; Caddy på Pi'en giver HTTPS på hjemmenetværket
  *   FINSTATE_ALLOWED_HOSTS  fx "finstate.local" (navnet, du åbner siden med)
+ *   FINSTATE_LOGIN          on (standard her) | off – login med adgangskode + 2FA
+ *   FINSTATE_DATA           client: serveren viser kun appen – data ligger på den computer, man åbner siden fra
  *
  * Kun hjemmenetværket: forespørgsler fra en offentlig IP-adresse afvises altid (se server/net.ts).
  */
@@ -14,7 +16,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handler } from './storage.ts';
+import { dataOnClient, handler, loginRequired } from './storage.ts';
 import { fromHomeNetwork } from './net.ts';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -55,7 +57,8 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-const api = handler(root);
+// På netværket: altid login med adgangskode + 2FA (FINSTATE_LOGIN=off slår det kun fra for 127.0.0.1/localhost).
+const api = handler(root, { requireLogin: loginRequired(true) });
 createServer((req, res) => {
   secure(res);
   // Kun dit eget netværk – aldrig udefra, heller ikke hvis en port ved en fejl åbnes i routeren.
@@ -65,5 +68,5 @@ createServer((req, res) => {
     void serveStatic(req, res);
   });
 }).listen(PORT, HOST, () => {
-  console.log(`Finstate kører på http://${HOST}:${PORT}  ·  data: ${process.env.FINSTATE_DIR ?? '~/Documents/Finstate'}`);
+  console.log(`Finstate kører på http://${HOST}:${PORT}  ·  data: ${dataOnClient() ? 'på den computer, man åbner siden fra (FINSTATE_DATA=client)' : process.env.FINSTATE_DIR ?? '~/Documents/Finstate'}`);
 });

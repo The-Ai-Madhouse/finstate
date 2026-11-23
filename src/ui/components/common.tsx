@@ -1,5 +1,6 @@
 import { categoryPath, flattenTree } from '../../domain/categories';
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { NEEDS_REVIEW, SOURCE_LABEL, type Source } from '../../domain/classify';
 import type { Check, Engine } from '../../domain/engine';
 import { kr, kr2f, parseAmount } from '../../domain/format';
@@ -174,6 +175,31 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
     listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [hi, open]);
 
+  // Listen lægges oven på alt andet (i <body>) og placeres ud fra feltet, så en dialog eller et vindue, der selv kan
+  // scrolle, ikke klipper den. Er der ikke plads nedenunder, åbner den opad.
+  const [pos, setPos] = useState<CSSProperties>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = inputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight, vw = window.innerWidth;
+      const below = vh - r.bottom - 12, above = r.top - 12;
+      const up = below < 220 && above > below;
+      const width = Math.min(Math.max(r.width, 300), vw - 16);
+      const left = Math.max(8, Math.min(r.left, vw - width - 8));
+      setPos({
+        position: 'fixed', left, width, maxHeight: Math.max(120, Math.min(360, up ? above : below)),
+        ...(up ? { bottom: vh - r.top + 6, top: 'auto' } : { top: r.bottom + 6 }),
+      });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open, inputRef]);
+
   const choose = (o: Opt, commit: boolean) => {
     setOpen(false);
     setQ('');
@@ -215,8 +241,8 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
           else if (onTypeKey && !e.altKey && /^[12]$/.test(e.key) && !/\d/.test(q)) { e.preventDefault(); e.stopPropagation(); onTypeKey(e.key, q); }
         }}
       />
-      {open && (
-        <div className="combo-list" role="listbox" ref={listRef}>
+      {open && pos && createPortal(
+        <div className="combo-list floating" role="listbox" ref={listRef} style={pos}>
           {opts.map((o, i) => (
             <Fragment key={o.id}>
               {o.group && (i === 0 || opts[i - 1].group !== o.group) && <div className="combo-group">{o.group}</div>}
@@ -234,7 +260,8 @@ export function SearchCombo({ options, value, onChange, onCommit, onTypeKey, onC
             </Fragment>
           ))}
           {!filtered.length && words.length > 0 && <div className="combo-empty">{emptyText} "{q}"</div>}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -581,7 +608,7 @@ export function AmountInput({ value, onCommit, onLive, className, placeholder, a
         placeholder={placeholder}
         aria-label={ariaLabel}
         autoFocus={autoFocus}
-        onFocus={(e) => { setTxt(fmt(value)); setFocused(true); const el = e.currentTarget; setTimeout(() => el.select(), 0); }}
+        onFocus={(e) => { setTxt(fmt(value)); setFocused(true); const el = e.currentTarget; setTimeout(() => { if (document.activeElement === el) el.select(); }, 0); }}
         onChange={(e) => {
           const el = e.target;
           const caret = el.selectionStart ?? el.value.length;
@@ -683,7 +710,7 @@ function pickModeFor(e: Engine, tx: Tx, period?: Period): Omit<LinkPick, 'txId'>
 }
 
 /** Kan transaktionen vælges som den anden i et par? (Bank: en anden konto og modsat retning.) */
-function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
+export function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
   if (other.id === pick.txId) return false;
   const src = txs.find((t) => t.id === pick.txId);
   if (!src) return false;
@@ -692,11 +719,19 @@ function validPick(pick: LinkPick, other: Tx, txs: Tx[]): boolean {
   return !src.link || other.link !== src.link;
 }
 
-/** Den anden er valgt: vis parringen, så man kan se om det går op – og skrive, hvor en evt. rest skal hen. */
-function completePick(pick: LinkPick, otherId: string) {
+/** Vælg/fravælg en transaktion. Ved en overførsel mellem dine konti er der kun én modpost – et nyt valg erstatter det gamle. */
+export function togglePick(pick: LinkPick, otherId: string) {
+  const cur = pick.others ?? [];
+  const others = cur.includes(otherId) ? cur.filter((x) => x !== otherId) : pick.mode === 'bank' ? [otherId] : [...cur, otherId];
+  useStore.getState().setLinkPick({ ...pick, others });
+}
+
+/** De valgte er klar: vis parringen, så man kan se om det går op – og skrive, hvor en evt. rest skal hen. */
+export function completePick(pick: LinkPick) {
+  if (!pick.others?.length) return;
   const { setLinkPick, setPairDraft } = useStore.getState();
   setLinkPick(undefined);
-  setPairDraft({ pick, otherId });
+  setPairDraft({ pick, otherIds: pick.others });
 }
 
 /**
@@ -728,7 +763,7 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
   const inPeriod = (t: Tx) => !period || (t.date >= period.start && t.date <= period.end);
   const options = pick
     ? txs
-      .filter((t) => inPeriod(t) && validPick(pick, t, txs))
+      .filter((t) => inPeriod(t) && validPick(pick, t, txs) && !pick.others?.includes(t.id))
       // Samme beløb (modsat retning) først, så nærmeste dato.
       .sort((a, b) => Number(b.amount === -tx.amount) - Number(a.amount === -tx.amount) || Math.abs(Date.parse(a.date) - Date.parse(tx.date)) - Math.abs(Date.parse(b.date) - Date.parse(tx.date)))
       .slice(0, 400)
@@ -764,9 +799,9 @@ function TxLinks({ tx, addNote }: { tx: Tx; addNote?: () => void }) {
           <SearchCombo className="sm" options={options} value={undefined}
             placeholder={pick.mode === 'post' ? `Par med… (${postName})` : pick.mode === 'bank' ? 'Modposten…' : 'Par med…'}
             searchPlaceholder="Søg dato, tekst eller beløb…" ariaLabel="Vælg den anden transaktion" emptyText="Ingen transaktion matcher – eller klik på den i listen"
-            onChange={(id) => { if (id) completePick(pick, id); }} />
+            onChange={(id) => { if (id) togglePick(pick, id); }} />
           <button className="btn sm ghost" onClick={() => setLinkPick(undefined)} aria-label="Annullér">✕</button>
-          <span className="small muted">eller klik på den i listen</span>
+          <span className="small muted">{pick.mode === 'bank' ? 'eller klik på den i listen' : 'eller klik på dem i listen – vælg gerne flere'}</span>
         </span>
       ) : (
         <span className="row" style={{ gap: 10 }}>
@@ -921,15 +956,22 @@ export function linkTargetProps(pick: LinkPick | undefined, txId: string) {
   const txs = useStore.getState().data.txs;
   const other = txs.find((t) => t.id === txId);
   if (!other || !validPick(pick, other, txs)) return { className: 'link-disabled' };
+  const on = !!pick.others?.includes(txId);
   return {
-    className: 'link-target',
-    title: 'Klik for at parre med den valgte transaktion',
+    className: `link-target ${on ? 'link-picked' : ''}`,
+    title: on ? 'Valgt – klik for at fravælge' : 'Klik for at vælge den – tryk Enter, når du har valgt dem, der hører sammen',
+    'aria-selected': on,
     onClickCapture: (ev: React.MouseEvent) => {
       ev.preventDefault();
       ev.stopPropagation();
-      completePick(pick, txId);
+      togglePick(pick, txId);
     },
   };
+}
+
+/** Forskellen på det valgte: "går op" eller beløbet, der bliver tilbage. */
+export function DiffPill({ sum }: { sum: number }) {
+  return <span className={`diff-pill ${sum === 0 ? 'zero' : ''}`}>{sum === 0 ? '✓ Går op' : <>Forskel <b className="num">{kr2f(sum)}</b></>}</span>;
 }
 
 /** Banner øverst, mens man vælger: hvilken transaktion man knytter fra – og Esc/Annullér. */
@@ -938,10 +980,18 @@ export function LinkPickBanner() {
   const tx = useStore((s) => s.data.txs.find((t) => t.id === s.linkPick?.txId));
   const postName = useStore((s) => s.data.accounts.find((a) => a.id === s.linkPick?.postId)?.name);
   const setLinkPick = useStore((s) => s.setLinkPick);
+  const all = useStore((s) => s.data.txs);
+  const chosen = (pick?.others ?? []).map((id) => all.find((t) => t.id === id)).filter((t): t is Tx => !!t);
   useEffect(() => {
     if (!pick) return;
     // I "capture"-fasen, så Esc også annullerer, når markøren står i søgefeltet (som ellers selv fanger Esc).
-    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setLinkPick(undefined); };
+    // Enter parrer de valgte – men ikke i søgefeltet, hvor Enter vælger det fremhævede.
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setLinkPick(undefined);
+      const el = ev.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+      if (ev.key === 'Enter' && !typing && pick.others?.length) { ev.preventDefault(); ev.stopPropagation(); completePick(pick); }
+    };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [pick, setLinkPick]);
@@ -949,12 +999,26 @@ export function LinkPickBanner() {
   return (
     <div className="banner info link-banner">
       <span className="grow">{pick.mode === 'post'
-        ? <>⇄ Klik på det, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med på <b>{postName}</b> – står den som noget andet, flyttes den til {postName}.</>
+        ? <>⇄ Klik på det, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med på <b>{postName}</b> – vælg gerne flere. Står de som noget andet, flyttes de til {postName}.</>
         : pick.mode === 'bank'
           ? <>⇄ Klik på modposten til <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) – på en anden af dine konti.</>
-          : <>⇄ Klik på den transaktion, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med – eller søg den frem i søgefeltet.</>}</span>
+          : <>⇄ Klik på dem, <b>{dateShort(tx.date)} "{tx.text}"</b> ({kr2f(tx.amount)}) skal parres med – vælg gerne flere, eller søg dem frem i søgefeltet.</>}
+      </span>
       <span className="spacer" />
       <button className="btn sm" onClick={() => setLinkPick(undefined)}>Annullér (Esc)</button>
+      <button className="btn sm primary" disabled={!chosen.length} onClick={() => completePick(pick)}>Par {chosen.length ? `${chosen.length} valgte ` : ''}(Enter)</button>
+      {chosen.length > 0 && (
+        <div className="link-chosen">
+          {chosen.map((t) => (
+            <span key={t.id} className="link-chip" title={t.text}>
+              {dateShort(t.date)} {t.text.length > 28 ? `${t.text.slice(0, 27)}…` : t.text} <b className="num">{kr2f(t.amount)}</b>
+              <button aria-label={`Fravælg ${t.text}`} onClick={() => togglePick(pick, t.id)}>✕</button>
+            </span>
+          ))}
+          <span className="spacer" />
+          <DiffPill sum={chosen.reduce((s, t) => s + t.amount, tx.amount)} />
+        </div>
+      )}
     </div>
   );
 }

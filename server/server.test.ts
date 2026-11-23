@@ -111,6 +111,62 @@ describe('server: 2FA-login og krypteret lagring', () => {
   });
 });
 
+describe('server: lokalt uden login', () => {
+  let dir: string;
+  let server: Server;
+  let base: string;
+  const keep = process.env.FINSTATE_DIR;
+  const start = async (requireLogin: boolean) => {
+    const h = handler('/tmp/finstate-projekt-test', { requireLogin });
+    server = createServer((req, res) => h(req, res, () => { res.statusCode = 404; res.end(); }));
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  };
+  const stop = () => new Promise<void>((r) => server.close(() => r()));
+  const call = (path: string, init: RequestInit & { cookie?: string; host?: string } = {}) =>
+    fetch(base + path, { ...init, headers: { 'Content-Type': 'application/json', ...(init.cookie ? { Cookie: init.cookie } : {}) } });
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'finstate-local-'));
+    process.env.FINSTATE_DIR = dir;
+    await writeFile(join(dir, 'finstate.json'), JSON.stringify({ state: { data: { hemmelig: 'Kontoudtog 4711' } }, version: 1 }));
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+    if (keep === undefined) delete process.env.FINSTATE_DIR; else process.env.FINSTATE_DIR = keep;
+  });
+
+  it('reads and saves without login, encrypted with a local key', async () => {
+    await start(false);
+    expect(await (await call('/api/auth/status')).json()).toMatchObject({ loggedIn: true, local: true });
+    expect(await (await call('/api/data')).json()).toMatchObject({ state: { data: { hemmelig: 'Kontoudtog 4711' } } });
+    expect(await readFile(join(dir, 'finstate.json'), 'utf8')).not.toContain('Kontoudtog');
+    expect((await call('/api/data', { method: 'PUT', body: JSON.stringify({ state: { data: { ny: 'Løn 30000' } }, version: 1 }) })).status).toBe(200);
+    expect(await readFile(join(dir, 'finstate.json'), 'utf8')).not.toContain('Løn');
+    expect((await readdir(dir)).sort()).toContain('local.key');
+    await stop();
+  });
+
+  it('moves to the network: login is set up with the same key, and the local key is removed', async () => {
+    await start(true);
+    expect((await call('/api/data')).status).toBe(401);
+    const s = await (await call('/api/auth/setup/start', { method: 'POST', body: JSON.stringify({ password: 'en lang adgangskode' }) })).json();
+    const r = await call('/api/auth/setup/finish', { method: 'POST', body: JSON.stringify({ setupTicket: s.setupTicket, code: totpAt(s.secret, totpCounter()) }) });
+    const cookie = (r.headers.get('set-cookie') ?? '').split(';')[0];
+    expect(await (await call('/api/data', { cookie })).json()).toMatchObject({ state: { data: { ny: 'Løn 30000' } } });
+    expect(await readdir(dir)).not.toContain('local.key');
+    await stop();
+
+    // Tilbage på computeren (fx en backup fra Pi'en): lås op én gang – derefter intet login.
+    await start(false);
+    expect(await (await call('/api/auth/status')).json()).toMatchObject({ loggedIn: false, unlockOnce: true });
+    expect((await call('/api/data')).status).toBe(401);
+    const code = totpAt(s.secret, totpCounter() + 1);
+    expect((await call('/api/auth/login', { method: 'POST', body: JSON.stringify({ password: 'en lang adgangskode', code }) })).status).toBe(200);
+    expect(await (await call('/api/data')).json()).toMatchObject({ state: { data: { ny: 'Løn 30000' } } });
+    await stop();
+  });
+});
+
 describe('kun hjemmenetværket', () => {
   it('godkender private adresser og afviser offentlige', async () => {
     const { isPrivateIp, clientIp } = await import('./net.ts');
@@ -124,5 +180,31 @@ describe('kun hjemmenetværket', () => {
     expect(clientIp(req('127.0.0.1', '192.168.1.7'))).toBe('192.168.1.7');
     // Direkte forbindelse: X-Forwarded-For ignoreres (kan forfalskes).
     expect(clientIp(req('8.8.8.8', '192.168.1.7'))).toBe('8.8.8.8');
+  });
+});
+
+describe('server: FINSTATE_DATA=client – kun appen, ingen data', () => {
+  it('reports client mode and never stores anything', async () => {
+    const keepData = process.env.FINSTATE_DATA, keepDir = process.env.FINSTATE_DIR;
+    const dir = await mkdtemp(join(tmpdir(), 'finstate-client-'));
+    process.env.FINSTATE_DATA = 'client';
+    process.env.FINSTATE_DIR = join(dir, 'skal-ikke-oprettes');
+    const h = handler('/tmp/finstate-projekt-test');
+    const srv = createServer((req, res) => h(req, res, () => { res.statusCode = 404; res.end(); }));
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+    try {
+      expect(await (await fetch(`${base}/api/auth/status`)).json()).toEqual({ configured: true, loggedIn: true, client: true });
+      expect(await (await fetch(`${base}/api/storage`)).json()).toEqual({ client: true });
+      const put = await fetch(`${base}/api/data`, { method: 'PUT', body: '{"hemmelig":1}' });
+      expect(put.status).toBe(404);
+      expect((await fetch(`${base}/api/backup`)).status).toBe(404);
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      await new Promise<void>((r) => srv.close(() => r()));
+      await rm(dir, { recursive: true, force: true });
+      if (keepData === undefined) delete process.env.FINSTATE_DATA; else process.env.FINSTATE_DATA = keepData;
+      if (keepDir === undefined) delete process.env.FINSTATE_DIR; else process.env.FINSTATE_DIR = keepDir;
+    }
   });
 });

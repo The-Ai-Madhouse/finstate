@@ -25,6 +25,22 @@ Internettet ──✕── routeren videresender intet · Pi'ens firewall afvis
 
 Brug et wifi med en god adgangskode (WPA2/WPA3), og sæt gerne gæster på routerens gæstenetværk. Så kan de slet ikke se Pi'en.
 
+## Hvor ligger dine data? To måder
+
+| | **Data på din computer** (`FINSTATE_DATA=client`, standard i `finstate.service`) | **Data på Pi'en** (fjern linjen) |
+|---|---|---|
+| Hvad gør Pi'en | Viser kun appen (programkoden). Gemmer **intet** og har intet login. | Viser appen og gemmer data krypteret i `/var/lib/finstate/data`. |
+| Hvor er data | I en mappe på den computer, du åbner siden fra (fx `Dokumenter/Finstate`) – krypteret med `local.key` i mappen. | På Pi'en – låses op med adgangskode + 2FA. |
+| Går data over netværket | **Nej.** Browseren læser og skriver filerne direkte på computeren. Kun appens kode hentes fra Pi'en. | Ja, krypteret med HTTPS mellem browseren og Pi'en på hjemmenetværket. |
+| Flere enheder | Hver computer har sine egne data (flyt med en backup). | Samme data fra Mac og telefon. |
+| Browser | Chrome, Edge eller Brave på en computer kan gemme i en mappe. Safari/Firefox/telefon gemmer i browserens eget lager (ikke krypteret). | Alle browsere. |
+
+Med data på din computer spørger Finstate første gang, **hvilken mappe** dine data skal ligge i. Vælg den samme mappe, som
+`npm start` bruger (`Dokumenter/Finstate`), så har du de samme data, uanset om du åbner Finstate fra Pi'en eller direkte på
+computeren. Mappen huskes; browseren kan bede dig bekræfte adgangen med ét klik, når du åbner siden igen. HTTPS (trin 4) er
+nødvendigt, for browseren giver kun adgang til mapper på sikre sider. Afsnit 3 (flyt data til Pi'en) og 5 (backup fra Pi'en)
+springes over – backup tager du under **Indstillinger → Download backup**.
+
 ## 1. Forbered Pi'en (én gang)
 
 Brug Raspberry Pi OS Lite (64-bit). Giv Pi'en værtsnavnet `finstate`, enten i Raspberry Pi Imager eller med `sudo raspi-config` →
@@ -93,10 +109,9 @@ sudo rsync -a /tmp/finstate/ /opt/finstate/ && sudo chown -R root:root /opt/fins
 cd /opt/finstate && sudo npm ci && sudo npm run build
 ```
 
-## 3. Flyt dine (krypterede) data over
+## 3. Flyt dine (krypterede) data over (kun med data på Pi'en)
 
-Sæt login op på Mac'en først. Start Finstate med `npm start`, så krypteres dine nuværende data. Kopiér derefter den krypterede
-mappe til Pi'en:
+Lokalt kører Finstate uden login, men data er krypteret med nøglen i `local.key`. Kopiér hele mappen (også `local.key`) til Pi'en:
 
 ```bash
 rsync -a ~/Documents/Finstate/ DINBRUGER@finstate.local:/tmp/finstate-data/      # på Mac'en – filerne er krypteret
@@ -104,7 +119,9 @@ sudo rsync -a /tmp/finstate-data/ /var/lib/finstate/data/ && sudo rm -rf /tmp/fi
 sudo chown -R finstate:finstate /var/lib/finstate/data
 ```
 
-Du logger ind på Pi'en med **samme adgangskode og 2FA-app**.
+Første gang du åbner Finstate på Pi'en, sætter du login op (adgangskode + 2FA-app). Login'et låser den samme nøgle op, og
+`local.key` slettes på Pi'en – derefter kan data kun læses med adgangskode + 2FA. Har du allerede sat login op tidligere, logger du ind med
+**samme adgangskode og 2FA-app**.
 
 ## 4. Start tjenesten og HTTPS
 
@@ -133,7 +150,7 @@ og sådan er den lavet med vilje.
 **Åbn aldrig en port i routeren til Pi'en, og brug ikke tjenester som Tailscale Funnel, ngrok eller Cloudflare Tunnel.** De
 gør siden tilgængelig udefra.
 
-## 5. Backup til din Mac
+## 5. Backup til din Mac (kun med data på Pi'en)
 
 Backuppen er en krypteret kopi af hele mappen. Den kan kun åbnes med din adgangskode og 2FA, og den hentes over
 hjemmenetværket.
@@ -153,7 +170,7 @@ scripts/backup-from-pi.sh DINBRUGER@finstate.local ~/Documents/FinstateBackup
 ```
 
 Scriptet beholder en kopi pr. dag (60 dage) i `snapshots/`. Ligger mappen under din Time Machine eller iCloud, kommer den
-automatisk med derfra. Sådan åbner du en backup på Mac'en:
+automatisk med derfra. Sådan åbner du en backup på Mac'en (første gang låser du den op med adgangskode + 2FA – derefter kører den uden login):
 
 ```bash
 FINSTATE_DIR=~/Documents/FinstateBackup/current npm start
