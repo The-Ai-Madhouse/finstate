@@ -608,7 +608,7 @@ export function AmountInput({ value, onCommit, onLive, className, placeholder, a
         placeholder={placeholder}
         aria-label={ariaLabel}
         autoFocus={autoFocus}
-        onFocus={(e) => { setTxt(fmt(value)); setFocused(true); const el = e.currentTarget; setTimeout(() => el.select(), 0); }}
+        onFocus={(e) => { setTxt(fmt(value)); setFocused(true); const el = e.currentTarget; setTimeout(() => { if (document.activeElement === el) el.select(); }, 0); }}
         onChange={(e) => {
           const el = e.target;
           const caret = el.selectionStart ?? el.value.length;

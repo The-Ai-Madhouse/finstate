@@ -300,6 +300,32 @@ export interface AppData {
   importProfiles: Record<string, ColumnMapping>;
   /** Dagligt budget (abonnementer og faste udgifter). Mangler i ældre data. */
   budget?: BudgetData;
+  /** Opsparingsmål (kun planlægning – flytter ingen penge og påvirker ikke regnskabet). Mangler i ældre data. */
+  goals?: Goal[];
+}
+
+export type GoalKind = 'travel' | 'holiday' | 'buffer' | 'car' | 'home' | 'gift' | 'education' | 'other';
+
+/** En post i målets budget, fx "Fly 8.000 kr." (øre). */
+export interface GoalCost { id: string; label: string; amount: number }
+
+/** Et opsparingsmål – til at se, hvad der skal til, og om det er realistisk. */
+export interface Goal {
+  id: string;
+  name: string;
+  kind: GoalKind;
+  /** Målbeløbet (øre). Har målet budgetposter, er målet summen af dem. */
+  target: number;
+  costs?: GoalCost[];
+  /** Det, du allerede har sparet op til målet (skrevet ind af dig – flytter ingen penge). */
+  saved: number;
+  /** Hvornår pengene skal være der. */
+  deadline?: string;
+  /** Hvad du regner med at kunne spare op pr. måned til målet (øre). */
+  monthly?: number;
+  priority: 1 | 2 | 3;
+  note?: string;
+  createdAt: string;
 }
 
 export const bankKey = (cat?: string, sub?: string) => `${cat ?? ''}|${sub ?? ''}`;

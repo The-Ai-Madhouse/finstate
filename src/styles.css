@@ -1075,3 +1075,50 @@ li.bud-row { cursor: default; }
 /* Kurtage på værdipapirhandler */
 .trade-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 3px; }
 .trade-chip { display: inline-flex; gap: 4px; align-items: center; padding: 1px 9px; border-radius: 999px; background: var(--sky); color: var(--pastel-ink); font-size: 11.5px; }
+
+/* ------------------------------------------------------------------ Mål (opsparingsmål – kun planlægning) */
+.content[data-view='goals'] { --tint: var(--butter); }
+.nav .step.goal-ic { background: var(--butter); color: var(--pastel-ink); }
+.goal-empty { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.goal-verdict { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; border-radius: var(--radius); background: var(--sky); color: var(--pastel-ink); }
+.goal-verdict b { font-size: 16px; font-weight: 750; }
+.goal-verdict.ok { background: var(--mint); }
+.goal-verdict.warn { background: var(--butter); }
+.goal-verdict.bad { background: var(--blush); }
+.goal-verdict .small { opacity: 0.85; }
+.goal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.goal-card { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--ring); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px; transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease); }
+.goal-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.goal-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.goal-head { display: flex; align-items: center; gap: 12px; }
+.goal-head .grow { display: flex; flex-direction: column; min-width: 0; }
+.goal-name { font-size: 17px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.goal-icon { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: var(--butter); color: var(--pastel-ink); }
+.goal-card.kind-travel .goal-icon, .goal-card.kind-holiday .goal-icon { background: var(--sky); }
+.goal-card.kind-buffer .goal-icon { background: var(--mint); }
+.goal-card.kind-car .goal-icon, .goal-card.kind-home .goal-icon { background: var(--lilac); }
+.goal-card.kind-gift .goal-icon { background: var(--blush); }
+.goal-card.kind-education .goal-icon { background: var(--sand); }
+.goal-status { flex: none; font-size: 11.5px; font-weight: 650; padding: 3px 10px; border-radius: 999px; background: var(--sky); color: var(--pastel-ink); white-space: nowrap; }
+.goal-status.ok { background: var(--mint); }
+.goal-status.warn { background: var(--butter); }
+.goal-status.bad { background: var(--blush); }
+.goal-big { font-size: 30px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.1; display: flex; flex-direction: column; text-align: left; }
+.goal-big-sub { font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--ink-2); margin-top: 4px; }
+.goal-bar { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.goal-bar span { display: block; height: 100%; border-radius: 999px; background: var(--bud-bar); transition: width 0.4s var(--ease); }
+.goal-numbers { align-items: baseline; }
+.goal-lines { display: flex; flex-direction: column; gap: 3px; }
+.goal-costs { display: flex; flex-wrap: wrap; gap: 6px; }
+.goal-costs span { padding: 2px 10px; border-radius: 999px; background: var(--surface-2); }
+.goal-note { white-space: pre-wrap; }
+.goal-dialog { width: min(640px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.goal-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.goal-form label, .goal-target { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.goal-form .wide { grid-column: 1 / -1; }
+.goal-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.goal-form input, .goal-form select, .goal-form textarea { font: inherit; font-size: 14px; font-weight: 400; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); }
+.goal-target .small { font-weight: 400; }
+.goal-preview { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--butter); color: var(--pastel-ink); font-size: 13.5px; }
+@media (max-width: 560px) { .goal-form { grid-template-columns: 1fr; } .goal-grid { grid-template-columns: 1fr; } }
+.goal-form .amount-wrap { display: block; } .goal-form .amount-wrap input, .goal-cost .amount-wrap input { width: 100%; padding-right: 30px; }

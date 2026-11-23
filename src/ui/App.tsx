@@ -1,3 +1,4 @@
+import { GoalsView } from './views/GoalsView';
 import { UndoLayer } from './components/Undo';
 import { StatementSwitcher } from './components/PeriodPrompt';
 import { NEEDS_REVIEW } from '../domain/classify';
@@ -64,6 +65,7 @@ export function App() {
 
         <div className="nav-label">Dagligt budget</div>
         <NavItem id="budget" label="Abonnementer" icon={<span className="step bud-ic">◷</span>} />
+        <NavItem id="goals" label="Mål" icon={<span className="step goal-ic">★</span>} />
 
         <div className="nav-label">Arbejdsgang</div>
         {WORK.map((w) => {
@@ -95,7 +97,7 @@ export function App() {
       <div className="main">
         <TopBar />
         <div className="content" data-view={view} key={view}>
-          {view !== 'overview' && view !== 'budget' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
+          {view !== 'overview' && view !== 'budget' && view !== 'goals' && <div className="no-print" style={{ marginBottom: 16 }}><ViewHelp view={view} /></div>}
           {view === 'overview' && <OverviewView />}
           {view === 'import' && <ImportView />}
           {view === 'ledger' && <LedgerView />}
@@ -106,6 +108,7 @@ export function App() {
           {view === 'settings' && <SettingsView />}
           {view === 'versions' && <VersionsView />}
           {view === 'budget' && <BudgetView />}
+          {view === 'goals' && <GoalsView />}
         </div>
       </div>
     </div>
@@ -136,6 +139,8 @@ function TopBar() {
       <div className="topbar">
         {view === 'budget'
           ? <span className="crumb">Dagligt budget · <b>Abonnementer & regninger</b> <span className="muted">(adskilt fra financial statementet)</span></span>
+          : view === 'goals'
+          ? <span className="crumb">Dagligt budget · <b>Mål</b> <span className="muted">(planlægning – flytter ingen penge)</span></span>
           : period
           ? <span className="crumb">Financial statement · <b>{period.name}</b> <span className="muted">({period.start} – {period.end})</span></span>
           : <span className="crumb muted">Intet financial statement valgt</span>}

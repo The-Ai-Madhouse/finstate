@@ -76,5 +76,6 @@ export function applyBackup(cur: AppData, b: BackupFile, mode: 'replace' | 'merg
           dismissed: [...new Set([...(cur.budget?.dismissed ?? []), ...(d.budget.dismissed ?? [])])],
         }
       : cur.budget,
+    goals: d.goals ? mergeById(cur.goals ?? [], d.goals) : cur.goals,
   };
 }

@@ -28,6 +28,11 @@ npm test         # tests af regnskabsmotoren
 > Med `FINSTATE_DATA=client` (standard i `deploy/finstate.service`) viser Pi'en kun appen, og **dine data bliver på den computer,
 > du åbner siden fra** – i en mappe, du vælger (fx `Dokumenter/Finstate`, krypteret), eller i browseren. Intet data sendes til Pi'en.
 
+> **Mål** (under *Dagligt budget*): skriv dine opsparingsmål ind – rejse, ferie, buffer, bil … – med beløb (eller poster),
+> dato, hvad du allerede har sparet, og hvad du kan spare pr. måned. Finstate viser, hvad det kræver pr. måned, hvornår du når
+> det med din plan, og om det er realistisk i forhold til det, du i snit har tilbage hver måned i dine bankdata. Kun
+> planlægning – der flyttes ingen penge, og regnskabet påvirkes ikke.
+
 > **Dagligt budget – abonnementer & regninger** (i menuen under *Dagligt budget*): adskilt fra financial statementet og
 > uden periode. Finstate finder selv dine faste træk (samme modtager med fast rytme – måned, kvartal, halvår eller år – og
 > nogenlunde samme beløb) og viser dem i en kalender med ✓ for betalte, næste store regning og de næste 12 måneder.

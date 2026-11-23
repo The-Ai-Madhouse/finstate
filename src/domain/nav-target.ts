@@ -3,14 +3,14 @@
  * Ren domæne-kode (ingen browser), så både kontrollerne i engine.ts og brugerfladen bruger samme stavemåde.
  */
 
-export type View = 'overview' | 'import' | 'ledger' | 'transfers' | 'balance' | 'statement' | 'slides' | 'settings' | 'versions' | 'budget';
-export const VIEWS: View[] = ['overview', 'import', 'ledger', 'transfers', 'balance', 'statement', 'slides', 'settings', 'versions', 'budget'];
+export type View = 'overview' | 'import' | 'ledger' | 'transfers' | 'balance' | 'statement' | 'slides' | 'settings' | 'versions' | 'budget' | 'goals';
+export const VIEWS: View[] = ['overview', 'import', 'ledger', 'transfers', 'balance', 'statement', 'slides', 'settings', 'versions', 'budget', 'goals'];
 export const SETTINGS_TABS = ['accounts', 'categories', 'rules', 'bank', 'periods', 'data'] as const;
 
 export const VIEW_LABEL: Record<View, string> = {
   overview: 'Overblik', import: 'Importér', ledger: 'Kategorisér', transfers: 'Overførsler', balance: 'Aktiver & passiver',
   statement: 'Regnskab', slides: 'Slideshow', settings: 'Indstillinger', versions: 'Versioner',
-  budget: 'Abonnementer & regninger',
+  budget: 'Abonnementer & regninger', goals: 'Mål',
 };
 
 /** Det, der står i adresselinjen (#/side/fane?p=periode). */
